@@ -1,0 +1,28 @@
+[2025-10-12T13:49:22.366Z] UnhandledRejection: Error: Timed Out
+    at C:\scriptbot\teletools\TelegramManager\node_modules\@whiskeysockets\baileys\lib\Utils\generics.js:136:32
+[2025-10-12T13:58:01.212Z] UnhandledRejection: ReferenceError: showMainMenu is not defined
+    at C:\scriptbot\teletools\TelegramManager\chatwa\index.js:705:5
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+[2025-10-12T14:00:26.178Z] UncaughtException: Error: Unsupported state or unable to authenticate data
+    at Decipheriv.final (node:internal/crypto/cipher:193:29)
+    at aesDecryptGCM (C:\scriptbot\teletools\TelegramManager\node_modules\@whiskeysockets\baileys\lib\Utils\crypto.js:93:58)
+    at decrypt (C:\scriptbot\teletools\TelegramManager\node_modules\@whiskeysockets\baileys\lib\Utils\noise-handler.js:31:51)
+    at Object.decodeFrame (C:\scriptbot\teletools\TelegramManager\node_modules\@whiskeysockets\baileys\lib\Utils\noise-handler.js:132:36)
+    at WebSocketClient.onMessageRecieved (C:\scriptbot\teletools\TelegramManager\node_modules\@whiskeysockets\baileys\lib\Socket\socket.js:212:15)
+    at WebSocketClient.emit (node:events:519:28)
+    at WebSocket.<anonymous> (C:\scriptbot\teletools\TelegramManager\node_modules\@whiskeysockets\baileys\lib\Socket\Client\web-socket-client.js:46:100)
+    at WebSocket.emit (node:events:519:28)
+    at Receiver.receiverOnMessage (C:\scriptbot\teletools\TelegramManager\node_modules\ws\lib\websocket.js:1220:20)
+    at Receiver.emit (node:events:519:28)
+[2025-10-12T14:58:53.175Z] UnhandledRejection: Error: ENOENT: no such file or directory, open 'C:\scriptbot\teletools\TelegramManager\chatwa\sessions\j\creds.json'
+    at async open (node:internal/fs/promises:639:25)
+    at async writeFile (node:internal/fs/promises:1212:14)
+[2025-10-12T14:59:23.542Z] UnhandledRejection: Error: ENOENT: no such file or directory, open 'C:\scriptbot\teletools\TelegramManager\chatwa\sessions\j\creds.json'
+    at async open (node:internal/fs/promises:639:25)
+    at async writeFile (node:internal/fs/promises:1212:14)
+[2025-10-12T14:59:53.912Z] UnhandledRejection: Error: ENOENT: no such file or directory, open 'C:\scriptbot\teletools\TelegramManager\chatwa\sessions\j\creds.json'
+    at async open (node:internal/fs/promises:639:25)
+    at async writeFile (node:internal/fs/promises:1212:14)
+[2025-10-12T15:00:24.221Z] UnhandledRejection: Error: ENOENT: no such file or directory, open 'C:\scriptbot\teletools\TelegramManager\chatwa\sessions\j\creds.json'
+    at async open (node:internal/fs/promises:639:25)
+    at async writeFile (node:internal/fs/promises:1212:14)
