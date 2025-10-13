@@ -691,12 +691,31 @@ async function autoLoginSemuaSession() {
 }
 
 function jadwalkanRefreshOtomatis() {
-    const min = 18;
-    const max = 32;
+    const min = 18; // batas bawah (menit)
+    const max = 32; // batas atas (menit)
     const delayMenit = Math.floor(Math.random() * (max - min + 1)) + min;
     const delayMs = delayMenit * 60 * 1000;
 
+    const waktuSekarang = new Date();
+    const waktuBerikutnya = new Date(waktuSekarang.getTime() + delayMs);
+    const formatWaktu = waktuBerikutnya.toLocaleTimeString('id-ID', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+    });
+
+    console.log(`[${waktuSekarang.toLocaleTimeString('id-ID')}] ✅ Jadwal refresh berikutnya dalam ${delayMenit} menit (${formatWaktu})`);
+
     setTimeout(() => {
+        try {
+            // Tambahkan logika refresh di sini jika diperlukan
+            // Misalnya: refreshStatus(); atau ping WA
+            console.log(`[${new Date().toLocaleTimeString('id-ID')}] 🔄 Menjalankan refresh otomatis...`);
+        } catch (err) {
+            console.error(`[${new Date().toLocaleTimeString('id-ID')}] ❌ Gagal menjalankan refresh:`, err);
+        }
+
+        // Jadwalkan ulang
         jadwalkanRefreshOtomatis();
     }, delayMs);
 }
