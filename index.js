@@ -704,7 +704,7 @@ function jadwalkanRefreshOtomatis() {
         second: '2-digit'
     });
 
-    console.log(`[${waktuSekarang.toLocaleTimeString('id-ID')}] ✅ Jadwal refresh berikutnya dalam ${delayMenit} menit (${formatWaktu})`);
+    console.log(`\n[${waktuSekarang.toLocaleTimeString('id-ID')}] ✅ Refresh ${delayMenit} menit (${formatWaktu})`);
 
     setTimeout(() => {
         try {
