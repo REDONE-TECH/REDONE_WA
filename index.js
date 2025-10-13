@@ -68,7 +68,7 @@ function showMainMenu() {
             showMainMenu();         
         } else if (choice === "3") {
             startAutoBroadcastFromFile();
-            await kirimPesanAntarSession();
+            showMainMenu();
         } else if (choice === "4") {
             modeHapusAktif = true;
             await hapusSemuaPesanPribadiMultiSession();
@@ -160,18 +160,20 @@ async function startBot(sessionPath, silent = false, showLog = true) {
                         console.log("⚠️ Login gagal: user ID tidak tersedia.");
                         return resolve();
                     }
-
+                
                     const fullId = sock.user.id;
                     const nomor = fullId.split(":")[0];
-
+                
                     if (!activeSockets.find(s => s.id === fullId)) {
                         activeSockets.push({ name: nomor, sock, id: fullId });
                     }
-
+                
+                    store.bind(sock.ev, sock, fullId); // ✅ aktifkan sistem penyimpanan dan auto-reply
+                
                     if (showLog) {
                         console.log(`✅ Bot tersambung sebagai ${fullId}`);
                     }
-
+                
                     resolve();
                     if (!silent) showMainMenu();
                 }
@@ -272,7 +274,7 @@ function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function generateRandomSchedule(maxPerDay = 15) {
+function generateRandomSchedule(maxPerDay = 100) {
     const startHour = 6;
     const endHour = 23;
     const schedule = [];
@@ -347,9 +349,8 @@ function startAutoBroadcastFromFile() {
         await new Promise(resolve => setTimeout(resolve, 3000));
 
         for (const akun of validSockets) {
-            // ✅ Tambahkan di sini
-            if (!akun.sock?.ws || akun.sock.ws.readyState !== 1) {
-                console.log(`⚠️ Socket ${akun.name} tidak siap, dilewati.`);
+            if (typeof akun.sock?.sendMessage !== "function") {
+                console.log(`⚠️ Socket ${akun.name} belum siap kirim pesan, dilewati.`);
                 continue;
             }
         
@@ -368,9 +369,8 @@ function startAutoBroadcastFromFile() {
 }
 
 async function kirimSalamKeGrup(sock, groupId, name) {
-    // 🔍 Validasi socket aktif
-    if (!sock?.user || typeof sock?.sendMessage !== "function" || !sock?.ws || sock.ws.readyState !== 1) {
-        console.log(`⚠️ Socket ${name} belum siap kirim pesan, dilewati.`);
+    if (!sock?.user || typeof sock?.sendMessage !== "function") {
+        console.log(`⚠️ Socket ${name} tidak valid atau belum siap, dilewati.`);
         return;
     }
 
@@ -411,7 +411,6 @@ async function kirimSalamKeGrup(sock, groupId, name) {
 
         const pesan = { text: `${salam}` };
         await sock.sendMessage(groupId, pesan);
-
         console.log(`✅ ${salam}, pesan terkirim oleh ${name} ke grup '${namaGrup}'`);
     } catch (err) {
         const errorMessage = err?.message || err?.toString() || "Unknown error";
