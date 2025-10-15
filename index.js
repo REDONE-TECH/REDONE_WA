@@ -185,7 +185,14 @@ async function startBot(sessionPath, silent = false, showLog = true) {
                     if (reason === DisconnectReason.timedOut) {
                         console.log(`⏱️ Session ${sock.user?.id || "unknown"} timeout, akan di-restart...`);
                         const index = activeSockets.findIndex(s => s.id === sock?.user?.id);
-                        if (index !== -1) activeSockets.splice(index, 1);
+                        if (index !== -1) {
+                            try {
+                                activeSockets[index].sock.ev.removeAllListeners();
+                            } catch (e) {
+                                console.log(`⚠️ Gagal bersihkan listener lama:`, e.message);
+                            }
+                            activeSockets.splice(index, 1);
+                        }
                         startBot(sessionPath, silent, showLog);
                         return;
                     }
@@ -235,21 +242,6 @@ async function startBot(sessionPath, silent = false, showLog = true) {
                 }
             });
 
-            sock.ev.on("messages.upsert", async ({ messages, type }) => {
-                if (type !== "notify") return;
-
-                for (const msg of messages) {
-                    if (msg.key.fromMe && msg.key.remoteJid.endsWith("@s.whatsapp.net")) {
-                        const log = {
-                            remoteJid: msg.key.remoteJid,
-                            id: msg.key.id,
-                            timestamp: msg.messageTimestamp
-                        };
-                        fs.appendFileSync("pesan_terkirim.log", JSON.stringify(log) + "\n");
-                    }
-                }
-            });
-
         } catch (e) {
             if (showLog) {
                 console.log("❌ Gagal login:", e.message);
@@ -268,10 +260,6 @@ function getSalamByJam() {
     if (jam >= 11 && jam <= 14) return "Selamat siang";
     if (jam >= 15 && jam <= 17) return "Selamat sore";
     return "Selamat malam";
-}
-
-function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 function generateRandomSchedule(maxPerDay = 100) {
@@ -555,7 +543,11 @@ async function hapusSemuaPesanPribadiMultiSession() {
                 const exists = store.chats[akunId][jid].messages.some((m) => m.key.id === msg.key.id);
                 if (exists) continue;
 
-                store.chats[akunId][jid].messages.push(msg);
+                const chat = store.chats[akunId][jid];
+                chat.messages.push(msg);
+                if (chat.messages.length > 100) {
+                    chat.messages.shift(); // buang pesan paling lama
+                }
 
                 if (!msg.key.fromMe && !repliedUsers.has(jid)) {
                     const outboundMessages = store.chats[akunId][jid].messages.filter(m =>
