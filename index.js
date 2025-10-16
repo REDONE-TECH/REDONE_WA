@@ -4,6 +4,7 @@ const readline = require("readline");
 const pino = require("pino");
 const fs = require("fs");
 const path = require("path");
+const fse = require("fs-extra");
 
 const logErrorToFile = (label, error) => {
     const logLine = `[${new Date().toISOString()}] ${label}: ${error?.stack || error}\n`;
@@ -55,7 +56,8 @@ function showMainMenu() {
     console.log("2. Ambil ID Grup untuk Broadcast Otomatis");
     console.log("3. Mulai Kirim Pesan Pakai ID Grup")
     console.log("4. Hapus Pesan untuk Semua Orang");
-    console.log("5. Hapus Session");
+    console.log("5. Pindahkan Session ke/dari Backup");
+    console.log("6. Hapus Session");
     console.log("0. Keluar");
 
     rl.question("Pilih menu: ", async (choiceRaw) => {
@@ -74,6 +76,8 @@ function showMainMenu() {
             await hapusSemuaPesanPribadiMultiSession();
             modeHapusAktif = false;
         } else if (choice === "5") {
+            pindahkanSession();    
+        } else if (choice === "6") {
             hapusSession();
         } else if (choice === "0") {
             console.log("Keluar...");
@@ -177,10 +181,18 @@ async function startBot(sessionPath, silent = false, showLog = true) {
                     resolve();
                     if (!silent) showMainMenu();
                 }
-
+                
                 if (connection === "close") {
                     const reason = lastDisconnect?.error?.output?.statusCode;
                     const sessionId = sock?.user?.id;
+                
+                    console.log(`🔌 Koneksi terputus: ${reason}`);
+                    console.log("📄 Detail error:", lastDisconnect?.error?.message || lastDisconnect?.error);
+                
+                    if (reason === 405) {
+                        console.log("❌ Error 405: Session ditolak oleh WhatsApp. Kemungkinan besar session tidak valid atau sudah logout.");
+                        // Tambahkan tindakan seperti hapus session atau minta login ulang
+                    }                
                 
                     if (reason === DisconnectReason.timedOut) {
                         console.log(`⏱️ Session ${sock.user?.id || "unknown"} timeout, akan di-restart...`);
@@ -628,6 +640,83 @@ async function hapusSemuaPesanPribadiMultiSession() {
     });
 }
 
+function pindahkanSession() {
+    const SESSIONS_ROOT = "./sessions";
+    const BACKUP_ROOT = "./backup_session";
+
+    if (!fs.existsSync(SESSIONS_ROOT)) fs.mkdirSync(SESSIONS_ROOT);
+    if (!fs.existsSync(BACKUP_ROOT)) fs.mkdirSync(BACKUP_ROOT);
+
+    const sesiAktif = fs.readdirSync(SESSIONS_ROOT).filter(f => fs.lstatSync(path.join(SESSIONS_ROOT, f)).isDirectory());
+    const sesiBackup = fs.readdirSync(BACKUP_ROOT).filter(f => fs.lstatSync(path.join(BACKUP_ROOT, f)).isDirectory());
+
+    console.log("\n==== PINDAHKAN SESSION ====");
+    console.log("1. Pindahkan dari sessions → backup_session");
+    console.log("2. Pindahkan dari backup_session → sessions");
+    console.log("B. Batal");
+
+    rl.question("Pilih opsi: ", (opsi) => {
+        if (opsi.toLowerCase() === "b") return showMainMenu();
+
+        const isBackup = opsi === "2";
+        const asalRoot = isBackup ? BACKUP_ROOT : SESSIONS_ROOT;
+        const tujuanRoot = isBackup ? SESSIONS_ROOT : BACKUP_ROOT;
+        const daftar = isBackup ? sesiBackup : sesiAktif;
+
+        if (daftar.length === 0) {
+            console.log(`⚠️ Tidak ada session di folder ${isBackup ? "backup_session" : "sessions"}.`);
+            return showMainMenu();
+        }
+
+        console.log(`\nSession yang tersedia di ${isBackup ? "backup_session" : "sessions"}:`);
+        daftar.forEach((f, i) => console.log(`${i + 1}. ${f}`));
+
+        rl.question("Pilih session yang ingin dipindahkan: ", (ans) => {
+            const index = parseInt(ans) - 1;
+            const nama = daftar[index];
+            if (!nama) {
+                console.log("⚠️ Pilihan tidak valid.");
+                return showMainMenu();
+            }
+
+            const asal = path.join(asalRoot, nama);
+            const tujuan = path.join(tujuanRoot, nama);
+
+            // ✅ Jika session sedang aktif, lepas dulu
+            if (!isBackup) {
+                const aktif = activeSockets.find(s => s.id === nama);
+                if (aktif) {
+                    try {
+                        aktif.sock.ev.removeAllListeners();
+                    } catch (e) {
+                        console.log(`⚠️ Gagal lepas listener: ${e.message}`);
+                    }
+                    const i = activeSockets.findIndex(s => s.id === nama);
+                    if (i !== -1) activeSockets.splice(i, 1);
+                    console.log(`🔌 Session ${nama} dilepas dari memori sebelum dipindahkan.`);
+                }
+            }
+
+            // ✅ Coba rename, fallback ke copy+delete jika gagal
+            try {
+                fs.renameSync(asal, tujuan);
+                console.log(`✅ Session '${nama}' dipindahkan ke ${path.basename(tujuanRoot)}.`);
+            } catch (err) {
+                console.log(`⚠️ Rename gagal: ${err.message}`);
+                try {
+                    fse.copySync(asal, tujuan);
+                    fs.rmSync(asal, { recursive: true, force: true });
+                    console.log(`✅ Session '${nama}' dipindahkan dengan salin + hapus.`);
+                } catch (err2) {
+                    console.log(`❌ Gagal memindahkan: ${err2.message}`);
+                }
+            }
+
+            showMainMenu();
+        });
+    });
+}
+
 function hapusSession() {
     const folders = fs.readdirSync(SESSIONS_ROOT).filter(f => fs.lstatSync(path.join(SESSIONS_ROOT, f)).isDirectory());
     if (folders.length === 0) {
@@ -699,20 +788,21 @@ function jadwalkanRefreshOtomatis() {
 
     setTimeout(() => {
         try {
-            // Tambahkan logika refresh di sini jika diperlukan
-            // Misalnya: refreshStatus(); atau ping WA
             console.log(`[${new Date().toLocaleTimeString('id-ID')}] 🔄 Menjalankan refresh otomatis...`);
         } catch (err) {
             console.error(`[${new Date().toLocaleTimeString('id-ID')}] ❌ Gagal menjalankan refresh:`, err);
         }
-
-        // Jadwalkan ulang
+    
         jadwalkanRefreshOtomatis();
     }, delayMs);
 }
 
 (async () => {
-    await autoLoginSemuaSession();
-    showMainMenu();
-    jadwalkanRefreshOtomatis();
+    try {
+        await autoLoginSemuaSession();
+        showMainMenu();
+        jadwalkanRefreshOtomatis();
+    } catch (err) {
+        console.error("❌ Gagal menjalankan bot:", err);
+    }
 })();
