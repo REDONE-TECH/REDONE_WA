@@ -611,7 +611,7 @@ async function hapusSemuaPesanPribadiMultiSession() {
 
 function pindahkanSession() {
     const SESSIONS_ROOT = "./sessions";
-    const BACKUP_ROOT = "./backup_session";
+    const BACKUP_ROOT = "./backup";
 
     if (!fs.existsSync(SESSIONS_ROOT)) fs.mkdirSync(SESSIONS_ROOT);
     if (!fs.existsSync(BACKUP_ROOT)) fs.mkdirSync(BACKUP_ROOT);
