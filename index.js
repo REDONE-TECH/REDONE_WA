@@ -609,7 +609,7 @@ async function hapusSemuaPesanPribadiMultiSession() {
     });
 }
 
-function pindahkanSession() {
+async function pindahkanSession() {
     const SESSIONS_ROOT = "./sessions";
     const BACKUP_ROOT = "./backup";
 
@@ -620,12 +620,10 @@ function pindahkanSession() {
     const sesiBackup = fs.readdirSync(BACKUP_ROOT).filter(f => fs.lstatSync(path.join(BACKUP_ROOT, f)).isDirectory());
 
     console.log("\n==== PINDAHKAN SESSION ====");
-    console.log("1. Pindahkan dari sessions → backup_session");
-    console.log("2. Pindahkan dari backup_session → sessions");
-    console.log("B. Batal");
+    console.log("1. Pindahkan dari sessions → backup");
+    console.log("2. Pindahkan dari backup → sessions");
 
-    rl.question("Pilih opsi: ", (opsi) => {
-        if (opsi.toLowerCase() === "b") return showMainMenu();
+    rl.question("Pilih opsi: ", async (opsi) => {
 
         const isBackup = opsi === "2";
         const asalRoot = isBackup ? BACKUP_ROOT : SESSIONS_ROOT;
@@ -633,17 +631,21 @@ function pindahkanSession() {
         const daftar = isBackup ? sesiBackup : sesiAktif;
 
         if (daftar.length === 0) {
-            console.log(`⚠️ Tidak ada session di folder ${isBackup ? "backup_session" : "sessions"}.`);
+            console.log(`⚠️ Tidak ada session di folder ${isBackup ? "backup" : "sessions"}.`);
             return showMainMenu();
         }
 
-        console.log(`\nSession yang tersedia di ${isBackup ? "backup_session" : "sessions"}:`);
+        console.log(`\nSession yang tersedia di ${isBackup ? "backup" : "sessions"}:`);
         daftar.forEach((f, i) => console.log(`${i + 1}. ${f}`));
         console.log("ALL. Pindahkan semua session");
 
-        rl.question("Pilih session yang ingin dipindahkan: ", (ans) => {
+        rl.question("Pilih session yang ingin dipindahkan): ", async (ans) => {
+
             let indices = [];
+            let pindahkanSemua = false;
+
             if (ans.toLowerCase() === "all") {
+                pindahkanSemua = true;
                 indices = daftar.map((_, i) => i);
             } else {
                 indices = ans.split(",")
@@ -656,6 +658,8 @@ function pindahkanSession() {
                 return showMainMenu();
             }
 
+            const sessionsDipindahkan = [];
+
             for (const index of indices) {
                 const nama = daftar[index];
                 const asal = path.join(asalRoot, nama);
@@ -667,9 +671,7 @@ function pindahkanSession() {
                         try {
                             aktif.sock.ev.removeAllListeners();
                             aktif.sock.end();
-                        } catch (e) {
-                            console.log(`⚠️ Gagal lepas listener: ${e.message}`);
-                        }
+                        } catch {}
                         const i = activeSockets.findIndex(s => s.id === aktif.id);
                         if (i !== -1) activeSockets.splice(i, 1);
                     }
@@ -678,17 +680,27 @@ function pindahkanSession() {
                 try {
                     fs.renameSync(asal, tujuan);
                     console.log(`✅ Session '${nama}' dipindahkan ke ${path.basename(tujuanRoot)}.`);
+                    sessionsDipindahkan.push(nama);
                 } catch (err) {
-                    console.log(`⚠️ Rename gagal: ${err.message}`);
-                    try {
-                        fse.copySync(asal, tujuan);
-                        fs.rmSync(asal, { recursive: true, force: true });
-                        console.log(`✅ Session '${nama}' dipindahkan dengan salin + hapus.`);
-                    } catch (err2) {
-                        console.log(`❌ Gagal memindahkan '${nama}': ${err2.message}`);
-                    }
+                    console.log(`❌ Gagal memindahkan '${nama}': ${err.message}`);
                 }
             }
+
+            if (isBackup) {
+                if (pindahkanSemua) {
+                    await autoLoginSemuaSession();
+                    deduplicateSessions();
+                } else {
+                    for (const nama of sessionsDipindahkan) {
+                        const sessionPath = path.join(SESSIONS_ROOT, nama);
+                        await startBot(sessionPath, true, false);
+                    }
+                    deduplicateSessions();
+                }
+            }
+
+            console.log(`📊 Total session dipindahkan: ${sessionsDipindahkan.length}`);
+            console.log(`📊 Total session aktif sekarang: ${activeSockets.length}`);
 
             showMainMenu();
         });
@@ -696,7 +708,10 @@ function pindahkanSession() {
 }
 
 function hapusSession() {
-    const folders = fs.readdirSync(SESSIONS_ROOT).filter(f => fs.lstatSync(path.join(SESSIONS_ROOT, f)).isDirectory());
+    const folders = fs.readdirSync(SESSIONS_ROOT).filter(f =>
+        fs.lstatSync(path.join(SESSIONS_ROOT, f)).isDirectory()
+    );
+
     if (folders.length === 0) {
         console.log("⚠️ Tidak ada session untuk dihapus.");
         return showMainMenu();
@@ -706,19 +721,58 @@ function hapusSession() {
     folders.forEach((f, i) => {
         console.log(`${i + 1}. ${f}`);
     });
-    console.log("B. Batal");
+    console.log("ALL. Hapus semua session");
 
     rl.question("Pilih session yang ingin dihapus: ", (ans) => {
-        if (ans.toLowerCase() === "b") return showMainMenu();
-        const index = parseInt(ans) - 1;
-        if (folders[index]) {
-            const dir = path.join(SESSIONS_ROOT, folders[index]);
-            fs.rmSync(dir, { recursive: true, force: true });
-            console.log(`✅ Session '${folders[index]}' dihapus.`);
+
+        let indices = [];
+        let hapusSemua = false;
+
+        if (ans.toLowerCase() === "all") {
+            hapusSemua = true;
+            indices = folders.map((_, i) => i);
         } else {
-            console.log("Pilihan tidak valid.");
+            indices = ans.split(",")
+                .map(x => parseInt(x.trim()) - 1)
+                .filter(i => !isNaN(i) && i >= 0 && i < folders.length);
         }
-        showMainMenu();
+
+        if (indices.length === 0) {
+            console.log("⚠️ Pilihan tidak valid.");
+            return showMainMenu();
+        }
+
+        const target = hapusSemua ? folders : indices.map(i => folders[i]);
+        console.log("\n📂 Session yang akan dihapus:");
+        target.forEach(n => console.log(`- ${n}`));
+
+        rl.question("Yakin hapus? (y/n): ", (confirm) => {
+            if (confirm.toLowerCase() !== "y") {
+                console.log("❌ Dibatalkan, tidak ada session dihapus.");
+                return showMainMenu();
+            }
+
+            let totalHapus = 0;
+            for (const nama of target) {
+                const dir = path.join(SESSIONS_ROOT, nama);
+                try {
+                    fs.rmSync(dir, { recursive: true, force: true });
+                    console.log(`✅ Session '${nama}' dihapus.`);
+                    totalHapus++;
+
+                    const idx = activeSockets.findIndex(s => s.name === nama || s.id.startsWith(nama));
+                    if (idx !== -1) {
+                        try { activeSockets[idx].sock.ev.removeAllListeners(); } catch {}
+                        activeSockets.splice(idx, 1);
+                    }
+                } catch (err) {
+                    console.log(`❌ Gagal hapus '${nama}': ${err.message}`);
+                }
+            }
+
+            console.log(`📊 Total session dihapus: ${totalHapus}`);
+            showMainMenu();
+        });
     });
 }
 
