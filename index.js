@@ -172,7 +172,7 @@ async function startBot(sessionPath, silent = false, showLog = true) {
                         activeSockets.push({ name: nomor, sock, id: fullId });
                     }
                 
-                    store.bind(sock.ev, sock, fullId); // ✅ aktifkan sistem penyimpanan dan auto-reply
+                    store.bind(sock.ev, sock, fullId);
                 
                     if (showLog) {
                         console.log(`✅ Bot tersambung sebagai ${fullId}`);
@@ -185,48 +185,22 @@ async function startBot(sessionPath, silent = false, showLog = true) {
                 if (connection === "close") {
                     const reason = lastDisconnect?.error?.output?.statusCode;
                     const sessionId = sock?.user?.id;
-                
-                    console.log(`🔌 Koneksi terputus: ${reason}`);
-                    console.log("📄 Detail error:", lastDisconnect?.error?.message || lastDisconnect?.error);
-                
-                    if (reason === 405) {
-                        console.log("❌ Error 405: Session ditolak oleh WhatsApp. Kemungkinan besar session tidak valid atau sudah logout.");
-                        // Tambahkan tindakan seperti hapus session atau minta login ulang
-                    }                
-                
-                    if (reason === DisconnectReason.timedOut) {
-                        console.log(`⏱️ Session ${sock.user?.id || "unknown"} timeout, akan di-restart...`);
-                        const index = activeSockets.findIndex(s => s.id === sock?.user?.id);
-                        if (index !== -1) {
-                            try {
-                                activeSockets[index].sock.ev.removeAllListeners();
-                            } catch (e) {
-                                console.log(`⚠️ Gagal bersihkan listener lama:`, e.message);
-                            }
-                            activeSockets.splice(index, 1);
-                        }
-                        startBot(sessionPath, silent, showLog);
-                        return;
-                    }
-                
-                    if (showLog) {
-                        console.log(`🔌 Koneksi terputus: ${DisconnectReason[reason] || reason}`);
-                    }
-                
+
                     const isFatal =
                         reason === DisconnectReason.badSession ||
-                        reason === DisconnectReason.loggedOut;
+                        reason === DisconnectReason.loggedOut ||
+                        reason === 405;
                 
                     if (isFatal && sessionId) {
                         const index = activeSockets.findIndex(s => s.id === sessionId);
                         if (index !== -1) {
                             activeSockets.splice(index, 1);
                         }
-                
+
                         try {
                             fs.rmSync(sessionPath, { recursive: true, force: true });
                             if (showLog) {
-                                console.log(`🗑️ Session '${path.basename(sessionPath)}' dihapus karena disconnect fatal.`);
+                                console.log(`🗑️ Session '${path.basename(sessionPath)}' dihapus karena disconnect fatal (${reason}).`);
                             }
                         } catch (err) {
                             if (showLog) {
@@ -236,21 +210,20 @@ async function startBot(sessionPath, silent = false, showLog = true) {
                 
                         resolve();
                         if (!silent) showMainMenu();
-                    } else {
-                        if (showLog) {
-                            console.log("🔄 Koneksi terputus, mencoba reconnect...");
-                        }
-                
-                        // Hindari duplikasi socket saat reconnect
-                        if (sessionId) {
-                            const index = activeSockets.findIndex(s => s.id === sessionId);
-                            if (index !== -1) {
-                                activeSockets.splice(index, 1);
-                            }
-                        }
-                
-                        startBot(sessionPath, silent, showLog);
+                        return;
                     }
+
+                    if (sessionId) {
+                        const index = activeSockets.findIndex(s => s.id === sessionId);
+                        if (index !== -1) {
+                            try {
+                                activeSockets[index].sock.ev.removeAllListeners();
+                            } catch {}
+                            activeSockets.splice(index, 1);
+                        }
+                    }
+                
+                    startBot(sessionPath, silent, showLog);
                 }
             });
 
@@ -362,7 +335,7 @@ function startAutoBroadcastFromFile() {
                 }
         
                 await kirimSalamKeGrup(akun.sock, groupId, akun.name);
-                await new Promise(resolve => setTimeout(resolve, 500)); // delay antar grup
+                await new Promise(resolve => setTimeout(resolve, 500));
             }
         }
     }, 60 * 1000);
@@ -374,7 +347,6 @@ async function kirimSalamKeGrup(sock, groupId, name) {
         return;
     }
 
-    // 🔍 Cek apakah tergabung di grup
     let tergabung = false;
     try {
         tergabung = await sudahJoinGrup(sock, groupId);
@@ -396,10 +368,7 @@ async function kirimSalamKeGrup(sock, groupId, name) {
         return;
     }
 
-    // 📝 Ambil salam berdasarkan jam
     const salam = getSalamByJam();
-
-    // 📡 Kirim pesan ke grup
     try {
         let namaGrup = "";
         try {
@@ -558,7 +527,7 @@ async function hapusSemuaPesanPribadiMultiSession() {
                 const chat = store.chats[akunId][jid];
                 chat.messages.push(msg);
                 if (chat.messages.length > 100) {
-                    chat.messages.shift(); // buang pesan paling lama
+                    chat.messages.shift();
                 }
 
                 if (!msg.key.fromMe && !repliedUsers.has(jid)) {
@@ -642,7 +611,7 @@ async function hapusSemuaPesanPribadiMultiSession() {
 
 function pindahkanSession() {
     const SESSIONS_ROOT = "./sessions";
-    const BACKUP_ROOT = "./backup_session";
+    const BACKUP_ROOT = "./backup";
 
     if (!fs.existsSync(SESSIONS_ROOT)) fs.mkdirSync(SESSIONS_ROOT);
     if (!fs.existsSync(BACKUP_ROOT)) fs.mkdirSync(BACKUP_ROOT);
@@ -671,47 +640,50 @@ function pindahkanSession() {
         console.log(`\nSession yang tersedia di ${isBackup ? "backup_session" : "sessions"}:`);
         daftar.forEach((f, i) => console.log(`${i + 1}. ${f}`));
 
-        rl.question("Pilih session yang ingin dipindahkan: ", (ans) => {
-            const index = parseInt(ans) - 1;
-            const nama = daftar[index];
-            if (!nama) {
+        rrl.question("Pilih session yang ingin dipindahkan: ", (ans) => {
+            const indices = ans.split(",")
+                .map(x => parseInt(x.trim()) - 1)
+                .filter(i => i >= 0 && i < daftar.length);
+        
+            if (indices.length === 0) {
                 console.log("⚠️ Pilihan tidak valid.");
                 return showMainMenu();
             }
+        
+            for (const index of indices) {
+                const nama = daftar[index];
+                const asal = path.join(asalRoot, nama);
+                const tujuan = path.join(tujuanRoot, nama);
 
-            const asal = path.join(asalRoot, nama);
-            const tujuan = path.join(tujuanRoot, nama);
-
-            // ✅ Jika session sedang aktif, lepas dulu
-            if (!isBackup) {
-                const aktif = activeSockets.find(s => s.id === nama);
-                if (aktif) {
-                    try {
-                        aktif.sock.ev.removeAllListeners();
-                    } catch (e) {
-                        console.log(`⚠️ Gagal lepas listener: ${e.message}`);
+                if (!isBackup) {
+                    const aktif = activeSockets.find(s => s.id === nama);
+                    if (aktif) {
+                        try {
+                            aktif.sock.ev.removeAllListeners();
+                        } catch (e) {
+                            console.log(`⚠️ Gagal lepas listener: ${e.message}`);
+                        }
+                        const i = activeSockets.findIndex(s => s.id === nama);
+                        if (i !== -1) activeSockets.splice(i, 1);
+                        console.log(`🔌 Session ${nama} dilepas dari memori sebelum dipindahkan.`);
                     }
-                    const i = activeSockets.findIndex(s => s.id === nama);
-                    if (i !== -1) activeSockets.splice(i, 1);
-                    console.log(`🔌 Session ${nama} dilepas dari memori sebelum dipindahkan.`);
                 }
-            }
 
-            // ✅ Coba rename, fallback ke copy+delete jika gagal
-            try {
-                fs.renameSync(asal, tujuan);
-                console.log(`✅ Session '${nama}' dipindahkan ke ${path.basename(tujuanRoot)}.`);
-            } catch (err) {
-                console.log(`⚠️ Rename gagal: ${err.message}`);
                 try {
-                    fse.copySync(asal, tujuan);
-                    fs.rmSync(asal, { recursive: true, force: true });
-                    console.log(`✅ Session '${nama}' dipindahkan dengan salin + hapus.`);
-                } catch (err2) {
-                    console.log(`❌ Gagal memindahkan: ${err2.message}`);
+                    fs.renameSync(asal, tujuan);
+                    console.log(`✅ Session '${nama}' dipindahkan ke ${path.basename(tujuanRoot)}.`);
+                } catch (err) {
+                    console.log(`⚠️ Rename gagal: ${err.message}`);
+                    try {
+                        fse.copySync(asal, tujuan);
+                        fs.rmSync(asal, { recursive: true, force: true });
+                        console.log(`✅ Session '${nama}' dipindahkan dengan salin + hapus.`);
+                    } catch (err2) {
+                        console.log(`❌ Gagal memindahkan '${nama}': ${err2.message}`);
+                    }
                 }
             }
-
+        
             showMainMenu();
         });
     });
@@ -771,8 +743,8 @@ async function autoLoginSemuaSession() {
 }
 
 function jadwalkanRefreshOtomatis() {
-    const min = 18; // batas bawah (menit)
-    const max = 32; // batas atas (menit)
+    const min = 18;
+    const max = 32;
     const delayMenit = Math.floor(Math.random() * (max - min + 1)) + min;
     const delayMs = delayMenit * 60 * 1000;
 
@@ -780,8 +752,7 @@ function jadwalkanRefreshOtomatis() {
     const waktuBerikutnya = new Date(waktuSekarang.getTime() + delayMs);
     const formatWaktu = waktuBerikutnya.toLocaleTimeString('id-ID', {
         hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit'
+        minute: '2-digit'
     });
 
     console.log(`\n[${waktuSekarang.toLocaleTimeString('id-ID')}] ✅ Refresh ${delayMenit} menit (${formatWaktu})`);
