@@ -247,7 +247,7 @@ function getSalamByJam() {
     return "Selamat malam";
 }
 
-function generateRandomSchedule(maxPerDay = 100) {
+function generateRandomSchedule(maxPerDay = 15) {
     const startHour = 6;
     const endHour = 23;
     const schedule = [];
@@ -611,7 +611,7 @@ async function hapusSemuaPesanPribadiMultiSession() {
 
 function pindahkanSession() {
     const SESSIONS_ROOT = "./sessions";
-    const BACKUP_ROOT = "./backup";
+    const BACKUP_ROOT = "./backup_session";
 
     if (!fs.existsSync(SESSIONS_ROOT)) fs.mkdirSync(SESSIONS_ROOT);
     if (!fs.existsSync(BACKUP_ROOT)) fs.mkdirSync(BACKUP_ROOT);
@@ -639,33 +639,39 @@ function pindahkanSession() {
 
         console.log(`\nSession yang tersedia di ${isBackup ? "backup_session" : "sessions"}:`);
         daftar.forEach((f, i) => console.log(`${i + 1}. ${f}`));
+        console.log("ALL. Pindahkan semua session");
 
-        rrl.question("Pilih session yang ingin dipindahkan: ", (ans) => {
-            const indices = ans.split(",")
-                .map(x => parseInt(x.trim()) - 1)
-                .filter(i => i >= 0 && i < daftar.length);
-        
+        rl.question("Pilih session yang ingin dipindahkan: ", (ans) => {
+            let indices = [];
+            if (ans.toLowerCase() === "all") {
+                indices = daftar.map((_, i) => i);
+            } else {
+                indices = ans.split(",")
+                    .map(x => parseInt(x.trim()) - 1)
+                    .filter(i => !isNaN(i) && i >= 0 && i < daftar.length);
+            }
+
             if (indices.length === 0) {
                 console.log("⚠️ Pilihan tidak valid.");
                 return showMainMenu();
             }
-        
+
             for (const index of indices) {
                 const nama = daftar[index];
                 const asal = path.join(asalRoot, nama);
                 const tujuan = path.join(tujuanRoot, nama);
 
                 if (!isBackup) {
-                    const aktif = activeSockets.find(s => s.id === nama);
+                    const aktif = activeSockets.find(s => s.id.startsWith(nama));
                     if (aktif) {
                         try {
                             aktif.sock.ev.removeAllListeners();
+                            aktif.sock.end();
                         } catch (e) {
                             console.log(`⚠️ Gagal lepas listener: ${e.message}`);
                         }
-                        const i = activeSockets.findIndex(s => s.id === nama);
+                        const i = activeSockets.findIndex(s => s.id === aktif.id);
                         if (i !== -1) activeSockets.splice(i, 1);
-                        console.log(`🔌 Session ${nama} dilepas dari memori sebelum dipindahkan.`);
                     }
                 }
 
@@ -683,7 +689,7 @@ function pindahkanSession() {
                     }
                 }
             }
-        
+
             showMainMenu();
         });
     });
@@ -742,6 +748,51 @@ async function autoLoginSemuaSession() {
     }
 }
 
+function deduplicateSessions() {
+    const grouped = new Map();
+
+    for (const s of activeSockets) {
+        if (!s?.id) continue;
+        const nomor = s.id.split(":")[0];
+        const instance = parseInt(s.id.split(":")[1]) || 0;
+
+        if (!grouped.has(nomor)) {
+            grouped.set(nomor, [s]);
+        } else {
+            grouped.get(nomor).push(s);
+        }
+    }
+
+    for (const [nomor, sessions] of grouped.entries()) {
+        if (sessions.length > 1) {
+            sessions.sort((a, b) => {
+                const ia = parseInt(a.id.split(":")[1]) || 0;
+                const ib = parseInt(b.id.split(":")[1]) || 0;
+                return ib - ia;
+            });
+
+            const keep = sessions[0];
+            const remove = sessions.slice(1);
+
+            for (const s of remove) {
+                try {
+                    s.sock?.ev.removeAllListeners();
+                } catch {}
+                const idx = activeSockets.findIndex(x => x.id === s.id);
+                if (idx !== -1) activeSockets.splice(idx, 1);
+
+                try {
+                    const folderName = path.basename(s.sock?.authState?.credsPath || "");
+                    const sessionPath = path.join(SESSIONS_ROOT, folderName || nomor);
+                    fs.rmSync(sessionPath, { recursive: true, force: true });
+                } catch (err) {
+                    console.log(`⚠️ Gagal hapus session '${s.id}': ${err.message}`);
+                }
+            }
+        }
+    }
+}
+
 function jadwalkanRefreshOtomatis() {
     const min = 18;
     const max = 32;
@@ -755,11 +806,11 @@ function jadwalkanRefreshOtomatis() {
         minute: '2-digit'
     });
 
-    console.log(`\n[${waktuSekarang.toLocaleTimeString('id-ID')}] ✅ Refresh ${delayMenit} menit (${formatWaktu})`);
+    //console.log(`\n[${waktuSekarang.toLocaleTimeString('id-ID')}] ✅ Refresh ${delayMenit} menit (${formatWaktu})`);
 
     setTimeout(() => {
         try {
-            console.log(`[${new Date().toLocaleTimeString('id-ID')}] 🔄 Menjalankan refresh otomatis...`);
+            //console.log(`[${new Date().toLocaleTimeString('id-ID')}] 🔄 Menjalankan refresh otomatis...`);
         } catch (err) {
             console.error(`[${new Date().toLocaleTimeString('id-ID')}] ❌ Gagal menjalankan refresh:`, err);
         }
@@ -771,6 +822,7 @@ function jadwalkanRefreshOtomatis() {
 (async () => {
     try {
         await autoLoginSemuaSession();
+        deduplicateSessions();
         showMainMenu();
         jadwalkanRefreshOtomatis();
     } catch (err) {
