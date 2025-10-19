@@ -24,6 +24,7 @@ const activeSockets = [];
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 let currentDate = null;
 let schedule = null;
+let broadcastInterval = null;
 let modeHapusAktif = false;
 let sedangMenungguKonfirmasi = false;
 let totalBerhasilHapus = 0;
@@ -36,7 +37,7 @@ const store = {
 };
 
 function showMainMenu() {
-    console.log("\n\n==== STATUS SESSION ====");
+    console.log("\n==== STATUS SESSION ====");
 
     const sessionAktif = activeSockets.filter(s =>
         s.sock?.user &&
@@ -55,9 +56,10 @@ function showMainMenu() {
     console.log("1. Login / Tambah Session");
     console.log("2. Ambil ID Grup untuk Broadcast Otomatis");
     console.log("3. Mulai Kirim Pesan Pakai ID Grup")
-    console.log("4. Hapus Pesan untuk Semua Orang");
-    console.log("5. Pindahkan Session ke/dari Backup");
-    console.log("6. Hapus Session");
+    console.log("4. Kirim Pesan ke Diri Sendiri");
+    console.log("5. Hapus Pesan untuk Semua Orang");
+    console.log("6. Pindahkan Session ke/dari Backup");
+    console.log("7. Hapus Session");
     console.log("0. Keluar");
 
     rl.question("Pilih menu: ", async (choiceRaw) => {
@@ -70,14 +72,15 @@ function showMainMenu() {
             showMainMenu();         
         } else if (choice === "3") {
             startAutoBroadcastFromFile();
-            showMainMenu();
         } else if (choice === "4") {
+            await menuKirimPesanKeDiriSendiriMultiSession();
+        } else if (choice === "5") {
             modeHapusAktif = true;
             await hapusSemuaPesanPribadiMultiSession();
             modeHapusAktif = false;
-        } else if (choice === "5") {
-            pindahkanSession();    
         } else if (choice === "6") {
+            pindahkanSession();    
+        } else if (choice === "7") {
             hapusSession();
         } else if (choice === "0") {
             console.log("Keluar...");
@@ -247,7 +250,7 @@ function getSalamByJam() {
     return "Selamat malam";
 }
 
-function generateRandomSchedule(maxPerDay = 15) {
+function generateRandomSchedule(maxPerDay = 100) {
     const startHour = 6;
     const endHour = 23;
     const schedule = [];
@@ -273,37 +276,67 @@ function generateRandomSchedule(maxPerDay = 15) {
     return schedule.sort();
 }
 
-async function sudahJoinGrup(sock, groupId) {
-    try {
-        const grupAktif = await sock.groupFetchAllParticipating();
-        return Object.keys(grupAktif).includes(groupId);
-    } catch (err) {
-        console.log(`⚠️ Gagal cek grup ${groupId}:`, err.message);
-        return false;
-    }
+
+function isSocketReady(sock) {
+    return sock && sock.user?.id && typeof sock.sendMessage === "function";
 }
 
-function startAutoBroadcastFromFile() {
+async function startAutoBroadcastFromFile() {
     const filePath = "group_id.txt";
     if (!fs.existsSync(filePath)) {
         console.log("⚠️ Belum ada grup yang disimpan. Silakan pilih dulu.");
-        return;
+        return showMainMenu();
     }
 
     const groupIds = fs.readFileSync(filePath, "utf-8")
         .split("\n")
-        .map(line => line.trim())
+        .map(line => line.trim().toLowerCase())
         .filter(id => id.length > 0);
+
+    if (groupIds.length === 0) {
+        console.log("⚠️ Tidak ada ID grup tersimpan.");
+        return showMainMenu();
+    }
 
     const now = new Date();
     const today = now.toDateString();
-
     if (currentDate !== today) {
         currentDate = today;
         schedule = generateRandomSchedule();
-        console.log("📅 Jadwal kirim pesan hari ini:", schedule);
+    }
+    console.log("\n📅 Jadwal kirim pesan hari ini:", schedule);
+    console.log("\n==== DAFTAR GRUP BROADCAST ====");
+    const sampleSock = activeSockets[0]?.sock;
+    for (const gid of groupIds) {
+        let namaGrup = "(tidak bisa ambil nama)";
+        if (sampleSock) {
+            try {
+                const metadata = await sampleSock.groupMetadata(gid);
+                namaGrup = metadata.subject;
+            } catch {}
+        }
+        console.log(`[+] ${gid} → ${namaGrup}`);
     }
 
+    console.log("\n🚀 Tes kirim manual ke nomor pribadi...");
+    try {
+        await activeSockets[0].sock.sendMessage(activeSockets[0].id, { text: "tes ke diri sendiri" });
+        console.log("✅ Tes kirim berhasil");
+    } catch (e) {
+        console.log("❌ Tes kirim gagal:", e.message);
+    }
+
+    console.log("\n🚀 Mengirim pesan langsung pertama ke semua grup...");
+    const validSockets = activeSockets.filter(s => isSocketReady(s.sock));
+    for (const akun of validSockets) {
+        for (const groupId of groupIds) {
+            console.log(`➡️ Proses grup ${groupId} untuk akun ${akun.name}`);
+            await kirimSalamKeGrup(akun.sock, groupId, akun.name);
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+    }
+
+    showMainMenu();
     setInterval(async () => {
         const now = new Date();
         const nowDate = now.toDateString();
@@ -317,23 +350,18 @@ function startAutoBroadcastFromFile() {
 
         if (!schedule || !schedule.includes(currentTime)) return;
 
-        const validSockets = activeSockets.filter(s => !s.name.startsWith("temp_"));
+        const validSockets = activeSockets.filter(s => isSocketReady(s.sock));
+        if (validSockets.length === 0) {
+            console.log("⚠️ Tidak ada socket siap. Lewati siklus ini.");
+            return;
+        }
+
         console.log("⏳ Menunggu socket siap...");
         await new Promise(resolve => setTimeout(resolve, 3000));
 
         for (const akun of validSockets) {
-            if (typeof akun.sock?.sendMessage !== "function") {
-                console.log(`⚠️ Socket ${akun.name} belum siap kirim pesan, dilewati.`);
-                continue;
-            }
-        
+            if (!isSocketReady(akun.sock)) continue;
             for (const groupId of groupIds) {
-                const tergabung = await sudahJoinGrup(akun.sock, groupId);
-                if (!tergabung) {
-                    console.log(`🚫 Akun ${akun.name} belum tergabung di grup ${groupId}, dilewati.`);
-                    continue;
-                }
-        
                 await kirimSalamKeGrup(akun.sock, groupId, akun.name);
                 await new Promise(resolve => setTimeout(resolve, 500));
             }
@@ -347,44 +375,19 @@ async function kirimSalamKeGrup(sock, groupId, name) {
         return;
     }
 
-    let tergabung = false;
-    try {
-        tergabung = await sudahJoinGrup(sock, groupId);
-    } catch (err) {
-        console.log(`⚠️ Gagal cek keikutsertaan grup untuk ${name}: ${err.message || err}`);
-        return;
-    }
-
-    if (!tergabung) {
-        let namaGrup = groupId;
-        try {
-            const metadata = await sock.groupMetadata(groupId);
-            namaGrup = metadata.subject;
-        } catch (e) {
-            namaGrup = "❓(tidak bisa ambil nama)";
-        }
-
-        console.log(`🚫 Akun ${name} belum tergabung di grup '${namaGrup}', dilewati.`);
-        return;
-    }
-
     const salam = getSalamByJam();
-    try {
-        let namaGrup = "";
-        try {
-            const metadata = await sock.groupMetadata(groupId);
-            namaGrup = metadata.subject;
-        } catch (e) {
-            namaGrup = "❓(tidak bisa ambil nama)";
-        }
 
-        const pesan = { text: `${salam}` };
-        await sock.sendMessage(groupId, pesan);
+    try {
+        const metadata = await sock.groupMetadata(groupId);
+        const namaGrup = metadata?.subject || groupId;
+        const participants = metadata.participants.map(p => p.id);
+        await sock.assertSessions(participants);
+
+        await sock.sendMessage(groupId, { text: salam });
         console.log(`✅ ${salam}, pesan terkirim oleh ${name} ke grup '${namaGrup}'`);
+
     } catch (err) {
-        const errorMessage = err?.message || err?.toString() || "Unknown error";
-        console.log(`❌ Gagal kirim ke grup oleh ${name}: ${errorMessage}`);
-        console.log(`⏭️ Error bukan fatal, session '${name}' tetap dipertahankan.`);
+        console.log(`❌ Gagal kirim ke grup '${groupId}' oleh ${name}: ${err.message}`);
     }
 }
 
@@ -493,6 +496,59 @@ async function kirimAutoReplyDanHapus(sock, akunId, jid) {
             console.log("✅ Semua auto-reply selesai. Kembali ke menu utama...");
             showMainMenu();
         }
+    }
+}
+
+async function menuKirimPesanKeDiriSendiriMultiSession() {
+    console.log("\n==== KIRIM PESAN KE DIRI SENDIRI ====");
+
+    const filePath = "pesan_harian.txt";
+    if (!fs.existsSync(filePath)) {
+        console.log("❌ File 'pesan_harian.txt' tidak ditemukan.");
+        return showMainMenu();
+    }
+
+    const validSockets = activeSockets.filter(s => s.sock?.user && typeof s.sock?.sendMessage === "function");
+    if (validSockets.length === 0) {
+        console.log("❌ Tidak ada session aktif.");
+        return showMainMenu();
+    }
+
+    const totalSession = validSockets.length;
+
+    while (true) {
+        const lines = fs.readFileSync(filePath, "utf-8")
+            .split("\n")
+            .map(line => line.trim())
+            .filter(line => line.length > 0)
+            .sort(() => Math.random() - 0.5);
+
+        const totalPesan = lines.length;
+
+        for (let i = 0; i < totalPesan; i++) {
+            await Promise.all(validSockets.map(async (akun, idx) => {
+                const jid = akun.sock.user.id;
+                const pesanIndex = (i + idx) % totalPesan;
+                const pesan = lines[pesanIndex];
+                const now = new Date().toLocaleTimeString();
+
+                try {
+                    await akun.sock.sendMessage(jid, { text: pesan });
+                    console.log(`✅ [${akun.name} ${i + 1}] ${pesan} — ${now}`);
+                } catch (err) {
+                    console.log(`❌ [${akun.name} ${i + 1}] Gagal: ${err.message}`);
+                }
+            }));
+
+            console.log("─────────────────────────────────────────────────────────────────────");
+
+            const minDelayMinutes = 1;
+            const maxDelayMinutes = 3;
+            const delayMs = Math.floor(Math.random() * ((maxDelayMinutes - minDelayMinutes + 1) * 60000)) + (minDelayMinutes * 60000);
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
+
+        console.log("🔁 Semua pesan sudah dikirim. Mengulang siklus baru...\n");
     }
 }
 
