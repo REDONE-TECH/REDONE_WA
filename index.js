@@ -540,10 +540,10 @@ async function menuKirimPesanKeDiriSendiriMultiSession() {
                 }
             }));
 
-            console.log("─────────────────────────────────────────────────────────────────────");
+            console.log("──────────────────────────────────────────────────────────────────────");
 
-            const minDelayMinutes = 1;
-            const maxDelayMinutes = 3;
+            const minDelayMinutes = 10;
+            const maxDelayMinutes = 30;
             const delayMs = Math.floor(Math.random() * ((maxDelayMinutes - minDelayMinutes + 1) * 60000)) + (minDelayMinutes * 60000);
             await new Promise(resolve => setTimeout(resolve, delayMs));
         }
