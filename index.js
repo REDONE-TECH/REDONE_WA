@@ -5,11 +5,28 @@ const pino = require("pino");
 const fs = require("fs");
 const path = require("path");
 const fse = require("fs-extra");
-
+const SESSIONS_ROOT = "./sessions";
+const activeSockets = [];
+const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+const pendingAutoReply = new Set();
+const repliedUsers = new Set();
+const store = {
+    chats: {},
+    bind: function () {}
+};
 const logErrorToFile = (label, error) => {
     const logLine = `[${new Date().toISOString()}] ${label}: ${error?.stack || error}\n`;
     fs.appendFileSync("error_audit.log", logLine);
 };
+
+let currentDate = null;
+let schedule = null;
+let broadcastInterval = null;
+let modeHapusAktif = false;
+let sedangMenungguKonfirmasi = false;
+let totalBerhasilHapus = 0;
+let totalGagalHapus = 0;
+
 process.on("uncaughtException", (err) => {
     console.log("⚠️ Uncaught Exception:", err.message);
     logErrorToFile("UncaughtException", err);
@@ -18,23 +35,6 @@ process.on("unhandledRejection", (reason, promise) => {
     console.log("⚠️ Unhandled Rejection:", reason);
     logErrorToFile("UnhandledRejection", reason);
 });
-
-const SESSIONS_ROOT = "./sessions";
-const activeSockets = [];
-const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-let currentDate = null;
-let schedule = null;
-let broadcastInterval = null;
-let modeHapusAktif = false;
-let sedangMenungguKonfirmasi = false;
-let totalBerhasilHapus = 0;
-let totalGagalHapus = 0;
-const pendingAutoReply = new Set();
-const repliedUsers = new Set();
-const store = {
-    chats: {},
-    bind: function () {}
-};
 
 function showMainMenu() {
     console.log("\n==== STATUS SESSION ====");
@@ -59,7 +59,8 @@ function showMainMenu() {
     console.log("4. Kirim Pesan ke Diri Sendiri");
     console.log("5. Hapus Pesan untuk Semua Orang");
     console.log("6. Pindahkan Session ke/dari Backup");
-    console.log("7. Hapus Session");
+    console.log("7. Ganti Nama File Session");
+    console.log("8. Hapus Session");
     console.log("0. Keluar");
 
     rl.question("Pilih menu: ", async (choiceRaw) => {
@@ -79,8 +80,10 @@ function showMainMenu() {
             await hapusSemuaPesanPribadiMultiSession();
             modeHapusAktif = false;
         } else if (choice === "6") {
-            pindahkanSession();    
+            pindahkanSession();
         } else if (choice === "7") {
+            await menuGantiNamaFolderSession();     
+        } else if (choice === "8") {
             hapusSession();
         } else if (choice === "0") {
             console.log("Keluar...");
@@ -517,7 +520,7 @@ async function safeSend(sock, jid, pesan, akunName, index) {
             console.log(`⚠️ [${akunName} ${index}] Gagal kirim (percobaan ${attempt}): ${err.message}`);
 
             if (attempt < maxRetry) {
-                const waitMs = isTimeout || isConnClosed ? 30000 : 10000; // tunggu 30 detik kalau timeout
+                const waitMs = isTimeout || isConnClosed ? 30000 : 10000;
                 console.log(`⏳ Menunggu ${Math.floor(waitMs / 1000)} detik sebelum retry...`);
                 await new Promise(resolve => setTimeout(resolve, waitMs));
             } else {
@@ -788,6 +791,72 @@ async function pindahkanSession() {
             showMainMenu();
         });
     });
+}
+
+function ask(question) {
+    return new Promise(resolve => {
+        rl.question(question, answer => {
+            resolve(answer.trim());
+        });
+    });
+}
+
+async function menuGantiNamaFolderSession() {
+    console.log("\n==== GANTI NAMA FOLDER SESSION ====");
+
+    const sessionRoot = "./sessions";
+    if (!fs.existsSync(sessionRoot)) {
+        console.log("❌ Folder 'sessions' tidak ditemukan.");
+        return showMainMenu();
+    }
+
+    const folders = fs.readdirSync(sessionRoot).filter(name => {
+        const fullPath = path.join(sessionRoot, name);
+        return fs.lstatSync(fullPath).isDirectory();
+    });
+
+    if (folders.length === 0) {
+        console.log("⚠️ Tidak ada folder session yang tersedia.");
+        return showMainMenu();
+    }
+
+    console.log("📁 Folder session yang tersedia:");
+    folders.forEach((folder, idx) => {
+        console.log(`${idx + 1}. ${folder}`);
+    });
+
+    const pilih = await ask("Pilih nomor folder yang ingin diganti: ");
+    const index = parseInt(pilih.trim(), 10) - 1;
+    if (isNaN(index) || index < 0 || index >= folders.length) {
+        console.log("❌ Pilihan tidak valid.");
+        return showMainMenu();
+    }
+
+    const oldFolder = folders[index];
+    const newFolderRaw = await ask("Masukkan nama folder baru: ");
+    const newFolder = newFolderRaw.trim();
+
+    if (!newFolder || newFolder.includes("/") || newFolder.includes("\\") || newFolder.includes("..")) {
+        console.log("❌ Nama folder tidak valid.");
+        return showMainMenu();
+    }
+
+    const oldPath = path.join(sessionRoot, oldFolder);
+    const newPath = path.join(sessionRoot, newFolder);
+
+    if (fs.existsSync(newPath)) {
+        console.log("⚠️ Folder dengan nama baru sudah ada. Gagal mengganti.");
+        return showMainMenu();
+    }
+
+    try {
+        fs.renameSync(oldPath, newPath);
+        console.log(`✅ Berhasil mengganti '${oldFolder}' menjadi '${newFolder}'`);
+    } catch (err) {
+        console.log(`❌ Gagal mengganti folder: ${err.message}`);
+    }
+
+    showMainMenu();
 }
 
 function hapusSession() {
