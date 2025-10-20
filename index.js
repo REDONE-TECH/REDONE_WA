@@ -499,6 +499,34 @@ async function kirimAutoReplyDanHapus(sock, akunId, jid) {
     }
 }
 
+async function safeSend(sock, jid, pesan, akunName, index) {
+    const maxRetry = 5;
+    let attempt = 0;
+
+    while (attempt < maxRetry) {
+        try {
+            await sock.sendMessage(jid, { text: pesan });
+            const now = new Date().toLocaleTimeString();
+            console.log(`✅ [${akunName} ${index}] ${pesan} — ${now}`);
+            return;
+        } catch (err) {
+            attempt++;
+            const isTimeout = err?.output?.statusCode === 408 || err?.message?.includes("Timed Out");
+            const isConnClosed = err?.message?.includes("Connection Closed");
+
+            console.log(`⚠️ [${akunName} ${index}] Gagal kirim (percobaan ${attempt}): ${err.message}`);
+
+            if (attempt < maxRetry) {
+                const waitMs = isTimeout || isConnClosed ? 30000 : 10000; // tunggu 30 detik kalau timeout
+                console.log(`⏳ Menunggu ${Math.floor(waitMs / 1000)} detik sebelum retry...`);
+                await new Promise(resolve => setTimeout(resolve, waitMs));
+            } else {
+                console.log(`❌ [${akunName} ${index}] Gagal total setelah ${maxRetry} percobaan.`);
+            }
+        }
+    }
+}
+
 async function menuKirimPesanKeDiriSendiriMultiSession() {
     console.log("\n==== KIRIM PESAN KE DIRI SENDIRI ====");
 
@@ -533,8 +561,7 @@ async function menuKirimPesanKeDiriSendiriMultiSession() {
                 const now = new Date().toLocaleTimeString();
 
                 try {
-                    await akun.sock.sendMessage(jid, { text: pesan });
-                    console.log(`✅ [${akun.name} ${i + 1}] ${pesan} — ${now}`);
+                    await safeSend(akun.sock, jid, pesan, akun.name, i + 1);
                 } catch (err) {
                     console.log(`❌ [${akun.name} ${i + 1}] Gagal: ${err.message}`);
                 }
