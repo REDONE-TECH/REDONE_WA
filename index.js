@@ -508,22 +508,28 @@ async function safeSend(sock, jid, pesan, akunName, index) {
 
     while (attempt < maxRetry) {
         try {
+            // Validasi pesan
             if (!pesan || typeof pesan !== "string" || pesan.trim().length === 0) {
-                console.log(`⚠️ [${akunName} ${index}] Pesan kosong. Lewatkan.`);
+                console.log(`⚠️ [${akunName} ${index}] Pesan kosong atau tidak valid. Lewatkan.`);
                 return;
             }
 
-            if (!sock?.user || sock.ev?.state !== "open") {
-                console.log(`⚠️ [${akunName} ${index}] Session tidak aktif. Lewatkan.`);
+            // Validasi session aktif
+            const isValidSession = typeof sock?.sendMessage === "function" && typeof sock?.user?.id === "string";
+            if (!isValidSession) {
+                console.log(`⚠️ [${akunName} ${index}] Session tidak valid. Lewatkan.`);
                 return;
             }
 
+            // Kirim pesan
             await sock.sendMessage(jid, { text: pesan });
             const now = new Date().toLocaleTimeString();
             console.log(`✅ [${akunName} ${index}] ${pesan} — ${now}`);
             return;
+
         } catch (err) {
             attempt++;
+
             const isTimeout = err?.output?.statusCode === 408 || err?.message?.includes("Timed Out");
             const isConnClosed = err?.message?.includes("Connection Closed");
 
