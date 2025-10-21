@@ -508,20 +508,17 @@ async function safeSend(sock, jid, pesan, akunName, index) {
 
     while (attempt < maxRetry) {
         try {
-            // Validasi pesan
             if (!pesan || typeof pesan !== "string" || pesan.trim().length === 0) {
                 console.log(`⚠️ [${akunName} ${index}] Pesan kosong atau tidak valid. Lewatkan.`);
                 return;
             }
 
-            // Validasi session aktif
             const isValidSession = typeof sock?.sendMessage === "function" && typeof sock?.user?.id === "string";
             if (!isValidSession) {
                 console.log(`⚠️ [${akunName} ${index}] Session tidak valid. Lewatkan.`);
                 return;
             }
 
-            // Kirim pesan
             await sock.sendMessage(jid, { text: pesan });
             const now = new Date().toLocaleTimeString();
             console.log(`✅ [${akunName} ${index}] ${pesan} — ${now}`);
@@ -573,11 +570,17 @@ async function menuKirimPesanKeDiriSendiriMultiSession() {
         const totalPesan = lines.length;
 
         for (let i = 0; i < totalPesan; i++) {
+            const minDelayMinutes = 10;
+            const maxDelayMinutes = 30;
+            const delayMinutes = Math.floor(Math.random() * (maxDelayMinutes - minDelayMinutes + 1)) + minDelayMinutes;
+            const delaySeconds = Math.floor(Math.random() * 60);
+            const delayMs = (delayMinutes * 60000) + (delaySeconds * 1000);
+            console.log(`\ndelay pesan [${i + 1}] => ${delayMinutes} menit lebih ${delaySeconds} detik`);
+
             await Promise.all(validSockets.map(async (akun, idx) => {
                 const jid = akun.sock.user.id;
                 const pesanIndex = (i + idx) % totalPesan;
                 const pesan = lines[pesanIndex];
-                const now = new Date().toLocaleTimeString();
 
                 try {
                     await safeSend(akun.sock, jid, pesan, akun.name, i + 1);
@@ -587,10 +590,6 @@ async function menuKirimPesanKeDiriSendiriMultiSession() {
             }));
 
             console.log("──────────────────────────────────────────────────────────────────────");
-
-            const minDelayMinutes = 10;
-            const maxDelayMinutes = 30;
-            const delayMs = Math.floor(Math.random() * ((maxDelayMinutes - minDelayMinutes + 1) * 60000)) + (minDelayMinutes * 60000);
             await new Promise(resolve => setTimeout(resolve, delayMs));
         }
 
