@@ -26,6 +26,7 @@ let modeHapusAktif = false;
 let sedangMenungguKonfirmasi = false;
 let totalBerhasilHapus = 0;
 let totalGagalHapus = 0;
+let refreshSudahAktif = false;
 
 process.on("uncaughtException", (err) => {
     console.log("⚠️ Uncaught Exception:", err.message);
@@ -54,13 +55,14 @@ function showMainMenu() {
 
     console.log("\n==== MENU UTAMA ====");
     console.log("1. Login / Tambah Session");
-    console.log("2. Ambil ID Grup untuk Broadcast Otomatis");
-    console.log("3. Mulai Kirim Pesan Pakai ID Grup")
-    console.log("4. Kirim Pesan ke Diri Sendiri");
-    console.log("5. Hapus Pesan untuk Semua Orang");
-    console.log("6. Pindahkan Session ke/dari Backup");
-    console.log("7. Ganti Nama File Session");
-    console.log("8. Hapus Session");
+    console.log("2. Cek Status Batch Session");
+    console.log("3. Ambil ID Grup untuk Broadcast Otomatis");
+    console.log("4. Mulai Kirim Pesan Pakai ID Grup")
+    console.log("5. Kirim Pesan ke Diri Sendiri");
+    console.log("6. Hapus Pesan untuk Semua Orang");
+    console.log("7. Pindahkan Session ke/dari Backup");
+    console.log("8. Ganti Nama File Session");
+    console.log("9. Hapus Session");
     console.log("0. Keluar");
 
     rl.question("Pilih menu: ", async (choiceRaw) => {
@@ -69,21 +71,25 @@ function showMainMenu() {
         if (choice === "1") {
             loginSessionBaru();
         } else if (choice === "2") {
+            await autoLoginSemuaSession(10);
+            jadwalkanRefreshOtomatis();
+            showMainMenu();   
+        } else if (choice === "3") {
             await jalankanPemilihanGrupBroadcast();
             showMainMenu();         
-        } else if (choice === "3") {
-            startAutoBroadcastFromFile();
         } else if (choice === "4") {
-            await menuKirimPesanKeDiriSendiriMultiSession();
+            startAutoBroadcastFromFile();
         } else if (choice === "5") {
+            await menuKirimPesanKeDiriSendiriMultiSession();
+        } else if (choice === "6") {
             modeHapusAktif = true;
             await hapusSemuaPesanPribadiMultiSession();
             modeHapusAktif = false;
-        } else if (choice === "6") {
-            pindahkanSession();
         } else if (choice === "7") {
-            await menuGantiNamaFolderSession();     
+            pindahkanSession();
         } else if (choice === "8") {
+            await menuGantiNamaFolderSession();     
+        } else if (choice === "9") {
             hapusSession();
         } else if (choice === "0") {
             console.log("Keluar...");
@@ -943,29 +949,43 @@ function hapusSession() {
     });
 }
 
-async function autoLoginSemuaSession() {
+async function autoLoginSemuaSession(batchSize = 10) {
     if (!fs.existsSync(SESSIONS_ROOT)) return;
 
-    const folders = fs.readdirSync(SESSIONS_ROOT).filter(f => {
-        const fullPath = path.join(SESSIONS_ROOT, f);
-        return fs.lstatSync(fullPath).isDirectory();
-    });
+    const folders = fs.readdirSync(SESSIONS_ROOT)
+        .filter(f => fs.lstatSync(path.join(SESSIONS_ROOT, f)).isDirectory());
 
-    for (const folder of folders) {
-        const sessionPath = path.join(SESSIONS_ROOT, folder);
-        const credsPath = path.join(sessionPath, "creds.json");
+    if (folders.length === 0) {
+        console.log("⚠️ Tidak ada session tersimpan.");
+        return;
+    }
 
-        if (!fs.existsSync(credsPath)) {
-            try {
-                fs.rmSync(sessionPath, { recursive: true, force: true });
-                console.log(`🗑️ Folder kosong '${folder}' dihapus (tidak ada creds.json).`);
-            } catch (err) {
-                console.log(`⚠️ Gagal hapus folder '${folder}':`, err.message);
+    console.log(`🔍 Total session ditemukan: ${folders.length}`);
+    const totalBatch = Math.ceil(folders.length / batchSize);
+
+    for (let b = 0; b < totalBatch; b++) {
+        const batchFolders = folders.slice(b * batchSize, (b + 1) * batchSize);
+        console.log(`🚀 Memuat batch ${b + 1}/${totalBatch}: ${batchFolders.length} session`);
+
+        for (const folder of batchFolders) {
+            const sessionPath = path.join(SESSIONS_ROOT, folder);
+            const credsPath = path.join(sessionPath, "creds.json");
+
+            if (!fs.existsSync(credsPath)) {
+                try {
+                    fs.rmSync(sessionPath, { recursive: true, force: true });
+                    console.log(`🗑️ Folder kosong '${folder}' dihapus (tidak ada creds.json).`);
+                } catch (err) {
+                    console.log(`⚠️ Gagal hapus folder '${folder}':`, err.message);
+                }
+                continue;
             }
-            continue;
+
+            await startBot(sessionPath, true, false);
         }
 
-        await startBot(sessionPath, true, false);
+        console.log(`✅ Batch ${b + 1} selesai. Menunggu sebelum lanjut...`);
+        await new Promise(resolve => setTimeout(resolve, 3000));
     }
 }
 
@@ -1015,37 +1035,38 @@ function deduplicateSessions() {
 }
 
 function jadwalkanRefreshOtomatis() {
-    const min = 18;
-    const max = 32;
-    const delayMenit = Math.floor(Math.random() * (max - min + 1)) + min;
-    const delayMs = delayMenit * 60 * 1000;
+    if (refreshSudahAktif) return;
+    refreshSudahAktif = true;
 
-    const waktuSekarang = new Date();
-    const waktuBerikutnya = new Date(waktuSekarang.getTime() + delayMs);
-    const formatWaktu = waktuBerikutnya.toLocaleTimeString('id-ID', {
-        hour: '2-digit',
-        minute: '2-digit'
-    });
+    const loop = () => {
+        const min = 18;
+        const max = 32;
+        const delayMenit = Math.floor(Math.random() * (max - min + 1)) + min;
+        const delayMs = delayMenit * 60 * 1000;
 
-    //console.log(`\n[${waktuSekarang.toLocaleTimeString('id-ID')}] ✅ Refresh ${delayMenit} menit (${formatWaktu})`);
+        const waktuSekarang = new Date();
+        const waktuBerikutnya = new Date(waktuSekarang.getTime() + delayMs);
+        const formatWaktu = waktuBerikutnya.toLocaleTimeString('id-ID', {
+            hour: '2-digit',
+            minute: '2-digit'
+        });
 
-    setTimeout(() => {
-        try {
-            //console.log(`[${new Date().toLocaleTimeString('id-ID')}] 🔄 Menjalankan refresh otomatis...`);
-        } catch (err) {
-            console.error(`[${new Date().toLocaleTimeString('id-ID')}] ❌ Gagal menjalankan refresh:`, err);
-        }
-    
-        jadwalkanRefreshOtomatis();
-    }, delayMs);
+        setTimeout(() => {
+            try {
+            } catch (err) {
+                console.error(`[${new Date().toLocaleTimeString('id-ID')}] ❌ Gagal refresh:`, err);
+            }
+
+            loop();
+        }, delayMs);
+    };
+
+    loop();
 }
 
 (async () => {
     try {
-        await autoLoginSemuaSession();
-        deduplicateSessions();
         showMainMenu();
-        jadwalkanRefreshOtomatis();
     } catch (err) {
         console.error("❌ Gagal menjalankan bot:", err);
     }
