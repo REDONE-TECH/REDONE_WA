@@ -967,7 +967,7 @@ async function autoLoginSemuaSession(batchSize = 10) {
         const batchFolders = folders.slice(b * batchSize, (b + 1) * batchSize);
         console.log(`🚀 Memuat batch ${b + 1}/${totalBatch}: ${batchFolders.length} session`);
 
-        for (const folder of batchFolders) {
+        const tasks = batchFolders.map(async (folder) => {
             const sessionPath = path.join(SESSIONS_ROOT, folder);
             const credsPath = path.join(sessionPath, "creds.json");
 
@@ -976,13 +976,22 @@ async function autoLoginSemuaSession(batchSize = 10) {
                     fs.rmSync(sessionPath, { recursive: true, force: true });
                     console.log(`🗑️ Folder kosong '${folder}' dihapus (tidak ada creds.json).`);
                 } catch (err) {
-                    console.log(`⚠️ Gagal hapus folder '${folder}':`, err.message);
+                    console.log(`⚠️ Gagal hapus folder '${folder}': ${err.message}`);
                 }
-                continue;
+                return;
             }
 
-            await startBot(sessionPath, true, false);
-        }
+            const startTime = Date.now();
+            try {
+                await startBot(sessionPath, true, false);
+                const endTime = Date.now();
+                console.log(`✅ Session '${folder}' selesai dalam ${(endTime - startTime) / 1000}s`);
+            } catch (err) {
+                console.log(`❌ Gagal login session '${folder}': ${err.message}`);
+            }
+        });
+
+        await Promise.all(tasks);
 
         console.log(`✅ Batch ${b + 1} selesai. Menunggu sebelum lanjut...`);
         await new Promise(resolve => setTimeout(resolve, 3000));
