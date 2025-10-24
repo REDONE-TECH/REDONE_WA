@@ -181,7 +181,7 @@ async function startBot(sessionPath, silent = false, showLog = true) {
                     const nomor = fullId.split(":")[0];
                 
                     if (!activeSockets.find(s => s.id === fullId)) {
-                        activeSockets.push({ name: nomor, sock, id: fullId });
+                        activeSockets.push({ name: nomor, sock, id: fullId, folder: path.basename(sessionPath) });
                     }
                 
                     store.bind(sock.ev, sock, fullId);
@@ -291,7 +291,7 @@ function isSocketReady(sock) {
         sock &&
         typeof sock.sendMessage === "function" &&
         typeof sock.user?.id === "string" &&
-        sock.state?.connection === "open"
+        ["open", "connecting"].includes(sock.state?.connection)
     );
 }
 
@@ -584,14 +584,20 @@ async function menuKirimPesanKeDiriSendiriMultiSession() {
         return showMainMenu();
     }
 
+    // Validasi socket aktif dan siap kirim
     const validSockets = activeSockets.filter(s =>
-        s.sock?.user?.id &&
-        typeof s.sock?.sendMessage === "function" &&
-        s.sock?.state?.connection === "open"
+        s.sock &&
+        typeof s.sock.sendMessage === "function" &&
+        typeof s.sock.user?.id === "string" &&
+        ["open", "connecting"].includes(s.sock.state?.connection)
     );
 
     if (validSockets.length === 0) {
         console.log("❌ Tidak ada session aktif atau socket belum siap.");
+        console.log("🧪 Audit koneksi per session:");
+        activeSockets.forEach((s, i) => {
+            console.log(`  ${i + 1}. ${s.name} → ${s.sock?.state?.connection || "unknown"}`);
+        });
         return showMainMenu();
     }
 
@@ -838,7 +844,7 @@ async function pindahkanSession() {
 
                 for (const folder of semuaFolder) {
                     const sessionPath = path.join(SESSIONS_ROOT, folder);
-                    const sudahAktif = activeSockets.find(s => s.id.startsWith(folder));
+                    const sudahAktif = activeSockets.find(s => s.folder === folder);
                     if (!sudahAktif) {
                         await startBot(sessionPath, true, false);
                     }
