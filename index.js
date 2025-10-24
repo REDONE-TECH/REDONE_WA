@@ -550,8 +550,9 @@ async function safeSend(sock, jid, pesan, akunName, index) {
                 return;
             }
 
-            // Bangunkan socket sebelum kirim
+            // 🔧 Bangunkan socket sebelum kirim
             await sock.presenceSubscribe(jid);
+            await sock.sendPresenceUpdate("available", jid);
             await new Promise(resolve => setTimeout(resolve, 500));
 
             await sock.sendMessage(jid, { text: pesan });
@@ -563,7 +564,8 @@ async function safeSend(sock, jid, pesan, akunName, index) {
             attempt++;
 
             const isTimeout = err?.output?.statusCode === 408 || err?.message?.includes("Timed Out");
-            const isConnClosed = err?.message?.includes("Connection Closed");
+            const isConnClosed = err?.message?.includes("Connection Closed") || err?.message?.includes("close");
+
             const waitMs = isTimeout || isConnClosed ? 30000 : 10000;
 
             console.log(`⚠️ [${akunName} ${index}] Gagal kirim (percobaan ${attempt}): ${err.message}`);
