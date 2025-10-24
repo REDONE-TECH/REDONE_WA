@@ -27,6 +27,7 @@ let sedangMenungguKonfirmasi = false;
 let totalBerhasilHapus = 0;
 let totalGagalHapus = 0;
 let refreshSudahAktif = false;
+let heartbeatSudahAktif = false;
 
 process.on("uncaughtException", (err) => {
     console.log("⚠️ Uncaught Exception:", err.message);
@@ -72,6 +73,7 @@ function showMainMenu() {
             loginSessionBaru();
         } else if (choice === "2") {
             await autoLoginSemuaSession(10);
+            aktifkanHeartbeatSocket();
             jadwalkanRefreshOtomatis();
             showMainMenu();   
         } else if (choice === "3") {
@@ -528,6 +530,23 @@ async function kirimAutoReplyDanHapus(sock, akunId, jid) {
     }
 }
 
+function aktifkanHeartbeatSocket() {
+    if (heartbeatSudahAktif) return;
+    heartbeatSudahAktif = true;
+
+    setInterval(() => {
+        for (const akun of activeSockets) {
+            try {
+                if (akun.sock?.user?.id && typeof akun.sock.sendPresenceUpdate === "function") {
+                    akun.sock.sendPresenceUpdate("available");
+                }
+            } catch (err) {
+                console.log(`⚠️ Heartbeat gagal untuk ${akun.name}: ${err.message}`);
+            }
+        }
+    }, 60 * 1000);
+}
+
 async function safeSend(sock, jid, pesan, akunName, index) {
     const maxRetry = 5;
     let attempt = 0;
@@ -539,6 +558,7 @@ async function safeSend(sock, jid, pesan, akunName, index) {
                 return;
             }
 
+            // 🔍 Validasi koneksi sebelum kirim
             const isValidSession =
                 typeof sock?.sendMessage === "function" &&
                 typeof sock?.user?.id === "string" &&
@@ -546,13 +566,13 @@ async function safeSend(sock, jid, pesan, akunName, index) {
                 sock?.state?.connection === "open";
 
             if (!isValidSession) {
-                console.log(`⚠️ [${akunName} ${index}] Socket tidak aktif atau belum siap. Lewatkan.`);
+                console.log(`⚠️ [${akunName} ${index}] Socket tidak aktif atau koneksi tertutup. Lewatkan.`);
                 return;
             }
 
             // 🔧 Bangunkan socket sebelum kirim
+            await sock.sendPresenceUpdate("available");
             await sock.presenceSubscribe(jid);
-            await sock.sendPresenceUpdate("available", jid);
             await new Promise(resolve => setTimeout(resolve, 500));
 
             await sock.sendMessage(jid, { text: pesan });
@@ -565,10 +585,20 @@ async function safeSend(sock, jid, pesan, akunName, index) {
 
             const isTimeout = err?.output?.statusCode === 408 || err?.message?.includes("Timed Out");
             const isConnClosed = err?.message?.includes("Connection Closed") || err?.message?.includes("close");
-
             const waitMs = isTimeout || isConnClosed ? 30000 : 10000;
 
             console.log(`⚠️ [${akunName} ${index}] Gagal kirim (percobaan ${attempt}): ${err.message}`);
+
+            // 🔁 Coba aktifkan kembali koneksi jika tertutup
+            if (sock?.state?.connection !== "open" && typeof sock?.ev?.emit === "function") {
+                try {
+                    sock.ev.emit("connection.update", { connection: "connecting" });
+                    console.log(`🔄 [${akunName}] Emit reconnect attempt...`);
+                } catch (reconnectErr) {
+                    console.log(`⚠️ [${akunName}] Gagal emit reconnect: ${reconnectErr.message}`);
+                }
+            }
+
             if (attempt < maxRetry) {
                 console.log(`⏳ Menunggu ${Math.floor(waitMs / 1000)} detik sebelum retry...`);
                 await new Promise(resolve => setTimeout(resolve, waitMs));
