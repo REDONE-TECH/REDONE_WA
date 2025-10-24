@@ -191,7 +191,7 @@ async function startBot(sessionPath, silent = false, showLog = true) {
                     }
                 
                     resolve();
-                    if (!silent) showMainMenu();
+                    if (!silent && showLog) showMainMenu();
                 }
                 
                 if (connection === "close") {
@@ -221,7 +221,7 @@ async function startBot(sessionPath, silent = false, showLog = true) {
                         }
                 
                         resolve();
-                        if (!silent) showMainMenu();
+                        if (!silent && showLog) showMainMenu();
                         return;
                     }
 
@@ -244,7 +244,7 @@ async function startBot(sessionPath, silent = false, showLog = true) {
                 console.log("❌ Gagal login:", e.message);
             }
             resolve();
-            if (!silent) showMainMenu();
+            if (!silent && showLog) showMainMenu();
         }
     });
 }
@@ -313,24 +313,33 @@ async function startAutoBroadcastFromFile() {
         currentDate = today;
         schedule = generateRandomSchedule();
     }
+
     console.log("\n📅 Jadwal kirim pesan hari ini:", schedule);
     console.log("\n==== DAFTAR GRUP BROADCAST ====");
-    const sampleSock = activeSockets[0]?.sock;
+
+    const sampleSock = activeSockets.find(s => isSocketReady(s.sock))?.sock;
     for (const gid of groupIds) {
         let namaGrup = "(tidak bisa ambil nama)";
         if (sampleSock) {
             try {
                 const metadata = await sampleSock.groupMetadata(gid);
                 namaGrup = metadata.subject;
-            } catch {}
+            } catch (err) {
+                console.log(`⚠️ Gagal ambil metadata grup ${gid}: ${err.message}`);
+            }
         }
         console.log(`[+] ${gid} → ${namaGrup}`);
     }
 
     console.log("\n🚀 Tes kirim manual ke nomor pribadi...");
     try {
-        await activeSockets[0].sock.sendMessage(activeSockets[0].id, { text: "tes ke diri sendiri" });
-        console.log("✅ Tes kirim berhasil");
+        const testSock = activeSockets.find(s => isSocketReady(s.sock));
+        if (testSock) {
+            await testSock.sock.sendMessage(testSock.id, { text: "tes ke diri sendiri" });
+            console.log("✅ Tes kirim berhasil");
+        } else {
+            console.log("⚠️ Tidak ada socket aktif untuk tes.");
+        }
     } catch (e) {
         console.log("❌ Tes kirim gagal:", e.message);
     }
@@ -346,34 +355,38 @@ async function startAutoBroadcastFromFile() {
     }
 
     showMainMenu();
+
     setInterval(async () => {
-        const now = new Date();
-        const nowDate = now.toDateString();
-        const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+        try {
+            const now = new Date();
+            const nowDate = now.toDateString();
+            const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
 
-        if (nowDate !== currentDate && now.getHours() === 6) {
-            currentDate = nowDate;
-            schedule = generateRandomSchedule();
-            console.log("📅 Jadwal baru untuk", currentDate, ":", schedule);
-        }
-
-        if (!schedule || !schedule.includes(currentTime)) return;
-
-        const validSockets = activeSockets.filter(s => isSocketReady(s.sock));
-        if (validSockets.length === 0) {
-            console.log("⚠️ Tidak ada socket siap. Lewati siklus ini.");
-            return;
-        }
-
-        console.log("⏳ Menunggu socket siap...");
-        await new Promise(resolve => setTimeout(resolve, 3000));
-
-        for (const akun of validSockets) {
-            if (!isSocketReady(akun.sock)) continue;
-            for (const groupId of groupIds) {
-                await kirimSalamKeGrup(akun.sock, groupId, akun.name);
-                await new Promise(resolve => setTimeout(resolve, 500));
+            if (nowDate !== currentDate && now.getHours() === 6) {
+                currentDate = nowDate;
+                schedule = generateRandomSchedule();
+                console.log("📅 Jadwal baru untuk", currentDate, ":", schedule);
             }
+
+            if (!schedule || !schedule.includes(currentTime)) return;
+
+            const validSockets = activeSockets.filter(s => isSocketReady(s.sock));
+            if (validSockets.length === 0) {
+                console.log("⚠️ Tidak ada socket siap. Lewati siklus ini.");
+                return;
+            }
+
+            console.log(`⏳ Waktu cocok (${currentTime}). Menunggu socket siap...`);
+            await new Promise(resolve => setTimeout(resolve, 3000));
+
+            for (const akun of validSockets) {
+                for (const groupId of groupIds) {
+                    await kirimSalamKeGrup(akun.sock, groupId, akun.name);
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                }
+            }
+        } catch (err) {
+            console.log("⚠️ Error di siklus broadcast:", err.message);
         }
     }, 60 * 1000);
 }
@@ -519,11 +532,20 @@ async function safeSend(sock, jid, pesan, akunName, index) {
                 return;
             }
 
-            const isValidSession = typeof sock?.sendMessage === "function" && typeof sock?.user?.id === "string";
+            const isValidSession =
+                typeof sock?.sendMessage === "function" &&
+                typeof sock?.user?.id === "string" &&
+                sock?.ev &&
+                sock?.state?.connection === "open";
+
             if (!isValidSession) {
-                console.log(`⚠️ [${akunName} ${index}] Session tidak valid. Lewatkan.`);
+                console.log(`⚠️ [${akunName} ${index}] Socket tidak aktif atau belum siap. Lewatkan.`);
                 return;
             }
+
+            // Bangunkan socket sebelum kirim
+            await sock.presenceSubscribe(jid);
+            await new Promise(resolve => setTimeout(resolve, 500));
 
             await sock.sendMessage(jid, { text: pesan });
             const now = new Date().toLocaleTimeString();
@@ -535,11 +557,10 @@ async function safeSend(sock, jid, pesan, akunName, index) {
 
             const isTimeout = err?.output?.statusCode === 408 || err?.message?.includes("Timed Out");
             const isConnClosed = err?.message?.includes("Connection Closed");
+            const waitMs = isTimeout || isConnClosed ? 30000 : 10000;
 
             console.log(`⚠️ [${akunName} ${index}] Gagal kirim (percobaan ${attempt}): ${err.message}`);
-
             if (attempt < maxRetry) {
-                const waitMs = isTimeout || isConnClosed ? 30000 : 10000;
                 console.log(`⏳ Menunggu ${Math.floor(waitMs / 1000)} detik sebelum retry...`);
                 await new Promise(resolve => setTimeout(resolve, waitMs));
             } else {
@@ -558,9 +579,14 @@ async function menuKirimPesanKeDiriSendiriMultiSession() {
         return showMainMenu();
     }
 
-    const validSockets = activeSockets.filter(s => s.sock?.user && typeof s.sock?.sendMessage === "function");
+    const validSockets = activeSockets.filter(s =>
+        s.sock?.user?.id &&
+        typeof s.sock?.sendMessage === "function" &&
+        s.sock?.state?.connection === "open"
+    );
+
     if (validSockets.length === 0) {
-        console.log("❌ Tidak ada session aktif.");
+        console.log("❌ Tidak ada session aktif atau socket belum siap.");
         return showMainMenu();
     }
 
@@ -570,10 +596,15 @@ async function menuKirimPesanKeDiriSendiriMultiSession() {
         const lines = fs.readFileSync(filePath, "utf-8")
             .split("\n")
             .map(line => line.trim())
-            .filter(line => line.length > 0)
-            .sort(() => Math.random() - 0.5);
+            .filter(line => line.length > 0);
+
+        if (lines.length === 0) {
+            console.log("⚠️ File 'pesan_harian.txt' kosong.");
+            return showMainMenu();
+        }
 
         const totalPesan = lines.length;
+        const shuffledPesan = [...lines].sort(() => Math.random() - 0.5);
 
         for (let i = 0; i < totalPesan; i++) {
             const minDelayMinutes = 10;
@@ -581,12 +612,13 @@ async function menuKirimPesanKeDiriSendiriMultiSession() {
             const delayMinutes = Math.floor(Math.random() * (maxDelayMinutes - minDelayMinutes + 1)) + minDelayMinutes;
             const delaySeconds = Math.floor(Math.random() * 60);
             const delayMs = (delayMinutes * 60000) + (delaySeconds * 1000);
+
             console.log(`\ndelay pesan [${i + 1}] => ${delayMinutes} menit lebih ${delaySeconds} detik`);
 
             await Promise.all(validSockets.map(async (akun, idx) => {
                 const jid = akun.sock.user.id;
                 const pesanIndex = (i + idx) % totalPesan;
-                const pesan = lines[pesanIndex];
+                const pesan = shuffledPesan[pesanIndex];
 
                 try {
                     await safeSend(akun.sock, jid, pesan, akun.name, i + 1);
@@ -731,7 +763,6 @@ async function pindahkanSession() {
     console.log("2. Pindahkan dari backup → sessions");
 
     rl.question("Pilih opsi: ", async (opsi) => {
-
         const isBackup = opsi === "2";
         const asalRoot = isBackup ? BACKUP_ROOT : SESSIONS_ROOT;
         const tujuanRoot = isBackup ? SESSIONS_ROOT : BACKUP_ROOT;
@@ -747,7 +778,6 @@ async function pindahkanSession() {
         console.log("ALL. Pindahkan semua session");
 
         rl.question("Pilih session yang ingin dipindahkan): ", async (ans) => {
-
             let indices = [];
             let pindahkanSemua = false;
 
@@ -793,17 +823,23 @@ async function pindahkanSession() {
                 }
             }
 
+            // 🔧 Tambahan: pastikan semua session di folder sessions diload ulang
             if (isBackup) {
-                if (pindahkanSemua) {
-                    await autoLoginSemuaSession();
-                    deduplicateSessions();
-                } else {
-                    for (const nama of sessionsDipindahkan) {
-                        const sessionPath = path.join(SESSIONS_ROOT, nama);
+                const semuaFolder = fs.readdirSync(SESSIONS_ROOT).filter(f =>
+                    fs.lstatSync(path.join(SESSIONS_ROOT, f)).isDirectory()
+                );
+
+                console.log(`📦 Meload ulang semua session di folder 'sessions' (${semuaFolder.length} total)...`);
+
+                for (const folder of semuaFolder) {
+                    const sessionPath = path.join(SESSIONS_ROOT, folder);
+                    const sudahAktif = activeSockets.find(s => s.id.startsWith(folder));
+                    if (!sudahAktif) {
                         await startBot(sessionPath, true, false);
                     }
-                    deduplicateSessions();
                 }
+
+                deduplicateSessions();
             }
 
             console.log(`📊 Total session dipindahkan: ${sessionsDipindahkan.length}`);
