@@ -287,7 +287,12 @@ function generateRandomSchedule(maxPerDay = 100) {
 
 
 function isSocketReady(sock) {
-    return sock && sock.user?.id && typeof sock.sendMessage === "function";
+    return (
+        sock &&
+        typeof sock.sendMessage === "function" &&
+        typeof sock.user?.id === "string" &&
+        sock.state?.connection === "open"
+    );
 }
 
 async function startAutoBroadcastFromFile() {
