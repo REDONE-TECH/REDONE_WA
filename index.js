@@ -172,6 +172,8 @@ async function startBot(sessionPath, silent = false, showLog = true) {
                 }
 
                 if (connection === "open") {
+                    sock.state = sock.state || {};
+                    sock.state.connection = "open"; // ⬅️ Tambahan penting
                     if (!sock?.user?.id) {
                         console.log("⚠️ Login gagal: user ID tidak tersedia.");
                         return resolve();
