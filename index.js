@@ -294,8 +294,7 @@ function isSocketReady(sock) {
     return (
         sock &&
         typeof sock.sendMessage === "function" &&
-        typeof sock.user?.id === "string" &&
-        ["open", "connecting"].includes(sock.state?.connection)
+        typeof sock.user?.id === "string"
     );
 }
 
@@ -558,15 +557,22 @@ async function safeSend(sock, jid, pesan, akunName, index) {
                 return;
             }
 
-            // 🔍 Validasi koneksi sebelum kirim
+            // 🔍 Validasi dasar koneksi
             const isValidSession =
                 typeof sock?.sendMessage === "function" &&
                 typeof sock?.user?.id === "string" &&
-                sock?.ev &&
-                sock?.state?.connection === "open";
+                sock?.ev;
 
             if (!isValidSession) {
-                console.log(`⚠️ [${akunName} ${index}] Socket tidak aktif atau koneksi tertutup. Lewatkan.`);
+                console.log(`⚠️ [${akunName} ${index}] Socket tidak valid. Lewatkan.`);
+                return;
+            }
+
+            // 🔐 Validasi koneksi aktif dengan assertSessions
+            try {
+                await sock.assertSessions([jid]);
+            } catch (sessionErr) {
+                console.log(`⚠️ [${akunName} ${index}] Session tidak valid atau expired: ${sessionErr.message}`);
                 return;
             }
 
@@ -575,6 +581,7 @@ async function safeSend(sock, jid, pesan, akunName, index) {
             await sock.presenceSubscribe(jid);
             await new Promise(resolve => setTimeout(resolve, 500));
 
+            // 🚀 Kirim pesan
             await sock.sendMessage(jid, { text: pesan });
             const now = new Date().toLocaleTimeString();
             console.log(`✅ [${akunName} ${index}] ${pesan} — ${now}`);
@@ -589,7 +596,7 @@ async function safeSend(sock, jid, pesan, akunName, index) {
 
             console.log(`⚠️ [${akunName} ${index}] Gagal kirim (percobaan ${attempt}): ${err.message}`);
 
-            // 🔁 Coba aktifkan kembali koneksi jika tertutup
+            // 🔁 Emit reconnect jika koneksi tertutup
             if (sock?.state?.connection !== "open" && typeof sock?.ev?.emit === "function") {
                 try {
                     sock.ev.emit("connection.update", { connection: "connecting" });
