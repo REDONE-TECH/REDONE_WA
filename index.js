@@ -618,24 +618,10 @@ async function menuKirimPesanKeDiriSendiriMultiSession() {
         return showMainMenu();
     }
 
-    // Validasi socket aktif dan siap kirim
-    const validSockets = activeSockets.filter(s =>
-        s.sock &&
-        typeof s.sock.sendMessage === "function" &&
-        typeof s.sock.user?.id === "string" &&
-        ["open", "connecting"].includes(s.sock.state?.connection)
-    );
-
-    if (validSockets.length === 0) {
-        console.log("❌ Tidak ada session aktif atau socket belum siap.");
-        console.log("🧪 Audit koneksi per session:");
-        activeSockets.forEach((s, i) => {
-            console.log(`  ${i + 1}. ${s.name} → ${s.sock?.state?.connection || "unknown"}`);
-        });
-        return showMainMenu();
-    }
-
-    const totalSession = validSockets.length;
+    // 🔄 Pastikan semua session aktif sebelum mulai siklus
+    console.log("🔄 Memastikan semua session aktif sebelum mulai kirim...");
+    await autoLoginSemuaSession(10);
+    aktifkanHeartbeatSocket();
 
     while (true) {
         const lines = fs.readFileSync(filePath, "utf-8")
@@ -659,6 +645,27 @@ async function menuKirimPesanKeDiriSendiriMultiSession() {
             const delayMs = (delayMinutes * 60000) + (delaySeconds * 1000);
 
             console.log(`\ndelay pesan [${i + 1}] => ${delayMinutes} menit lebih ${delaySeconds} detik`);
+
+            // 🔄 Cek ulang session sebelum batch kirim
+            await autoLoginSemuaSession(10);
+            aktifkanHeartbeatSocket();
+
+            const validSockets = activeSockets.filter(s =>
+                s.sock &&
+                typeof s.sock.sendMessage === "function" &&
+                typeof s.sock.user?.id === "string" &&
+                s.sock.state?.connection === "open"
+            );
+
+            if (validSockets.length === 0) {
+                console.log("⚠️ Tidak ada session aktif. Lewati batch ini.");
+                continue;
+            }
+
+            console.log("🧪 Audit koneksi sebelum kirim:");
+            validSockets.forEach((s, idx) => {
+                console.log(`  ${idx + 1}. ${s.name} → ${s.sock?.state?.connection || "unknown"}`);
+            });
 
             await Promise.all(validSockets.map(async (akun, idx) => {
                 const jid = akun.sock.user.id;
