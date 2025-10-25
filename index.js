@@ -294,7 +294,8 @@ function isSocketReady(sock) {
     return (
         sock &&
         typeof sock.sendMessage === "function" &&
-        typeof sock.user?.id === "string"
+        typeof sock.user?.id === "string" &&
+        ["open", "connecting"].includes(sock.state?.connection)
     );
 }
 
@@ -568,11 +569,11 @@ async function safeSend(sock, jid, pesan, akunName, index) {
                 return;
             }
 
-            // 🔐 Validasi koneksi aktif dengan assertSessions
+            // 🔐 Validasi koneksi aktif secara nyata
             try {
                 await sock.assertSessions([jid]);
             } catch (sessionErr) {
-                console.log(`⚠️ [${akunName} ${index}] Session tidak valid atau expired: ${sessionErr.message}`);
+                console.log(`⚠️ [${akunName} ${index}] Session tidak valid: ${sessionErr.message}`);
                 return;
             }
 
@@ -625,6 +626,25 @@ async function menuKirimPesanKeDiriSendiriMultiSession() {
         return showMainMenu();
     }
 
+    // Validasi socket aktif dan siap kirim
+    const validSockets = activeSockets.filter(s =>
+        s.sock &&
+        typeof s.sock.sendMessage === "function" &&
+        typeof s.sock.user?.id === "string" &&
+        ["open", "connecting"].includes(s.sock.state?.connection)
+    );
+
+    if (validSockets.length === 0) {
+        console.log("❌ Tidak ada session aktif atau socket belum siap.");
+        console.log("🧪 Audit koneksi per session:");
+        activeSockets.forEach((s, i) => {
+            console.log(`  ${i + 1}. ${s.name} → ${s.sock?.state?.connection || "unknown"}`);
+        });
+        return showMainMenu();
+    }
+
+    const totalSession = validSockets.length;
+
     while (true) {
         const lines = fs.readFileSync(filePath, "utf-8")
             .split("\n")
@@ -647,27 +667,6 @@ async function menuKirimPesanKeDiriSendiriMultiSession() {
             const delayMs = (delayMinutes * 60000) + (delaySeconds * 1000);
 
             console.log(`\ndelay pesan [${i + 1}] => ${delayMinutes} menit lebih ${delaySeconds} detik`);
-
-            await autoLoginSemuaSession(10);
-            await new Promise(resolve => setTimeout(resolve, 3000)); // beri waktu session masuk
-            aktifkanHeartbeatSocket();
-
-            const validSockets = activeSockets.filter(s =>
-                s.sock &&
-                typeof s.sock.sendMessage === "function" &&
-                typeof s.sock.user?.id === "string" &&
-                s.sock.state?.connection === "open"
-            );
-            
-            if (validSockets.length === 0) {
-                console.log("❌ Tidak ada session aktif setelah login ulang.");
-                return showMainMenu();
-            }
-
-            console.log("🧪 Audit koneksi sebelum kirim:");
-            validSockets.forEach((s, idx) => {
-                console.log(`  ${idx + 1}. ${s.name} → ${s.sock?.state?.connection || "unknown"}`);
-            });
 
             await Promise.all(validSockets.map(async (akun, idx) => {
                 const jid = akun.sock.user.id;
