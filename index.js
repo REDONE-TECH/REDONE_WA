@@ -618,12 +618,6 @@ async function menuKirimPesanKeDiriSendiriMultiSession() {
         return showMainMenu();
     }
 
-    // 🔄 Pastikan semua session aktif sebelum mulai siklus
-    console.log("🔄 Memastikan semua session aktif sebelum mulai kirim...");
-    await autoLoginSemuaSession(10);
-    await new Promise(resolve => setTimeout(resolve, 3000)); // beri waktu session masuk
-    aktifkanHeartbeatSocket();
-
     while (true) {
         const lines = fs.readFileSync(filePath, "utf-8")
             .split("\n")
