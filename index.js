@@ -621,6 +621,7 @@ async function menuKirimPesanKeDiriSendiriMultiSession() {
     // 🔄 Pastikan semua session aktif sebelum mulai siklus
     console.log("🔄 Memastikan semua session aktif sebelum mulai kirim...");
     await autoLoginSemuaSession(10);
+    await new Promise(resolve => setTimeout(resolve, 3000)); // beri waktu session masuk
     aktifkanHeartbeatSocket();
 
     while (true) {
@@ -646,8 +647,8 @@ async function menuKirimPesanKeDiriSendiriMultiSession() {
 
             console.log(`\ndelay pesan [${i + 1}] => ${delayMinutes} menit lebih ${delaySeconds} detik`);
 
-            // 🔄 Cek ulang session sebelum batch kirim
             await autoLoginSemuaSession(10);
+            await new Promise(resolve => setTimeout(resolve, 3000)); // beri waktu session masuk
             aktifkanHeartbeatSocket();
 
             const validSockets = activeSockets.filter(s =>
@@ -656,10 +657,10 @@ async function menuKirimPesanKeDiriSendiriMultiSession() {
                 typeof s.sock.user?.id === "string" &&
                 s.sock.state?.connection === "open"
             );
-
+            
             if (validSockets.length === 0) {
-                console.log("⚠️ Tidak ada session aktif. Lewati batch ini.");
-                continue;
+                console.log("❌ Tidak ada session aktif setelah login ulang.");
+                return showMainMenu();
             }
 
             console.log("🧪 Audit koneksi sebelum kirim:");
