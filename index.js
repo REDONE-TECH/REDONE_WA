@@ -201,24 +201,37 @@ async function startBot(sessionPath, silent = false, showLog = true) {
                 if (connection === "close") {
                     const reason = lastDisconnect?.error?.output?.statusCode;
                     const sessionId = sock?.user?.id;
-
+                
                     const isFatal =
                         reason === DisconnectReason.badSession ||
                         reason === DisconnectReason.loggedOut ||
-                        reason === 405;
+                        reason === 403 || // banned permanen
+                        reason === 405;   // session expired
                 
                     if (isFatal && sessionId) {
+                        const nomor = sessionId.split(":")[0]; // ambil nomor WA dari ID
                         const index = activeSockets.findIndex(s => s.id === sessionId);
                         if (index !== -1) {
                             activeSockets.splice(index, 1);
                         }
-
+                
                         try {
                             fs.rmSync(sessionPath, { recursive: true, force: true });
+                
+                            // ✅ Log ke audit teknis
+                            logErrorToFile("SessionFatalDisconnect", `Session '${path.basename(sessionPath)}' dihapus karena kode ${reason}`);
+                
+                            // ✅ Tambahkan ke fatal.txt
+                            const fatalPath = "fatal.txt";
+                            const line = `${new Date().toISOString()} | ${nomor} | reason ${reason}\n`;
+                            fs.appendFileSync(fatalPath, line);
+                
                             if (showLog) {
                                 console.log(`🗑️ Session '${path.basename(sessionPath)}' dihapus karena disconnect fatal (${reason}).`);
+                                console.log(`📝 Nomor '${nomor}' dicatat ke fatal.txt`);
                             }
                         } catch (err) {
+                            logErrorToFile("SessionDeleteError", `Gagal hapus session '${path.basename(sessionPath)}': ${err.message}`);
                             if (showLog) {
                                 console.log(`⚠️ Gagal hapus session '${path.basename(sessionPath)}':`, err.message);
                             }
@@ -228,7 +241,8 @@ async function startBot(sessionPath, silent = false, showLog = true) {
                         if (!silent && showLog) showMainMenu();
                         return;
                     }
-
+                
+                    // Jika bukan fatal, bersihkan socket dan coba login ulang
                     if (sessionId) {
                         const index = activeSockets.findIndex(s => s.id === sessionId);
                         if (index !== -1) {
@@ -239,6 +253,7 @@ async function startBot(sessionPath, silent = false, showLog = true) {
                         }
                     }
                 
+                    // Coba login ulang
                     startBot(sessionPath, silent, showLog);
                 }
             });
@@ -357,9 +372,27 @@ async function startAutoBroadcastFromFile() {
     const validSockets = activeSockets.filter(s => isSocketReady(s.sock));
     for (const akun of validSockets) {
         for (const groupId of groupIds) {
-            console.log(`➡️ Proses grup ${groupId} untuk akun ${akun.name}`);
-            await kirimSalamKeGrup(akun.sock, groupId, akun.name);
-            await new Promise(resolve => setTimeout(resolve, 500));
+            try {
+                const metadata = await akun.sock.groupMetadata(groupId);
+                console.log(`👥 Peserta grup '${metadata.subject}':`);
+                metadata.participants?.forEach(p => console.log(`- ${p.id}`));
+
+                const akunIdCek = akun.sock?.user?.id;
+                const isKomunitas = groupId.endsWith("@lid");
+                const isAnggota = metadata.participants?.some(p => p.id === akunIdCek);
+
+                console.log(`🔍 ID akun: ${akunIdCek}`);
+                if (!isAnggota && !isKomunitas) {
+                    console.log(`⛔ ${akun.name} bukan anggota grup '${metadata.subject}', dilewati.`);
+                    continue;
+                }
+
+                console.log(`➡️ Proses grup ${groupId} untuk akun ${akun.name}`);
+                await kirimSalamKeGrup(akun.sock, groupId, akun.name);
+                await new Promise(resolve => setTimeout(resolve, 500));
+            } catch (err) {
+                console.log(`⚠️ Gagal proses grup ${groupId} untuk ${akun.name}: ${err.message}`);
+            }
         }
     }
 
@@ -390,8 +423,27 @@ async function startAutoBroadcastFromFile() {
 
             for (const akun of validSockets) {
                 for (const groupId of groupIds) {
-                    await kirimSalamKeGrup(akun.sock, groupId, akun.name);
-                    await new Promise(resolve => setTimeout(resolve, 500));
+                    try {
+                        const metadata = await akun.sock.groupMetadata(groupId);
+                        console.log(`👥 Peserta grup '${metadata.subject}':`);
+                        metadata.participants?.forEach(p => console.log(`- ${p.id}`));
+
+                        const akunIdCek = akun.sock?.user?.id;
+                        const isKomunitas = groupId.endsWith("@lid");
+                        const isAnggota = metadata.participants?.some(p => p.id === akunIdCek);
+
+                        console.log(`🔍 ID akun: ${akunIdCek}`);
+                        if (!isAnggota && !isKomunitas) {
+                            console.log(`⛔ ${akun.name} bukan anggota grup '${metadata.subject}', dilewati.`);
+                            continue;
+                        }
+
+                        console.log(`➡️ Proses grup ${groupId} untuk akun ${akun.name}`);
+                        await kirimSalamKeGrup(akun.sock, groupId, akun.name);
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                    } catch (err) {
+                        console.log(`⚠️ Gagal proses grup ${groupId} untuk ${akun.name}: ${err.message}`);
+                    }
                 }
             }
         } catch (err) {
@@ -411,8 +463,23 @@ async function kirimSalamKeGrup(sock, groupId, name) {
     try {
         const metadata = await sock.groupMetadata(groupId);
         const namaGrup = metadata?.subject || groupId;
-        const participants = metadata.participants.map(p => p.id);
-        await sock.assertSessions(participants);
+        const akunId = sock.user.id;
+        const isKomunitas = groupId.endsWith("@lid");
+
+        console.log(`👥 Peserta grup '${namaGrup}':`);
+        metadata.participants?.forEach(p => console.log(`- ${p.id}`));
+        console.log(`🔍 ID akun: ${akunId}`);
+
+        // Validasi hanya untuk grup biasa
+        if (!isKomunitas) {
+            const participants = metadata.participants?.map(p => p.id) || [];
+            const isMember = participants.includes(akunId);
+            if (!isMember) {
+                console.log(`⛔ ${name} bukan anggota grup '${namaGrup}', dilewati.`);
+                return;
+            }
+            await sock.assertSessions(participants);
+        }
 
         await sock.sendMessage(groupId, { text: salam });
         console.log(`✅ ${salam}, pesan terkirim oleh ${name} ke grup '${namaGrup}'`);
@@ -430,13 +497,22 @@ async function jalankanPemilihanGrupBroadcast() {
             const grups = await akun.sock.groupFetchAllParticipating();
             const list = Object.values(grups);
 
+            console.log(`🔍 Ambil grup dari ${akun.name}, total: ${list.length}`);
+
             for (const g of list) {
                 if (!grupMap.has(g.id)) {
                     grupMap.set(g.id, g);
+
+                    const isKomunitas = g.id.endsWith("@lid");
+                    const isAktif = !g.announce && g.participants?.length > 0;
+
+                    if (isAktif || isKomunitas) {
+                        console.log(`✅ Grup aktif: ${g.subject}`);
+                    } else {
+                        console.log(`⚠️ Grup '${g.subject}' mungkin tidak bisa dikirim (announce mode atau kosong)`);
+                    }
                 }
             }
-
-            console.log(`🔍 Ambil grup dari ${akun.name}, total: ${list.length}`);
         } catch (err) {
             console.log(`⚠️ Gagal ambil grup dari ${akun.name}:`, err.message);
         }
