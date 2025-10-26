@@ -175,7 +175,7 @@ async function startBot(sessionPath, silent = false, showLog = true) {
 
                 if (connection === "open") {
                     sock.state = sock.state || {};
-                    sock.state.connection = "open"; // ⬅️ Tambahan penting
+                    sock.state.connection = "open";
                     if (!sock?.user?.id) {
                         console.log("⚠️ Login gagal: user ID tidak tersedia.");
                         return resolve();
@@ -205,11 +205,11 @@ async function startBot(sessionPath, silent = false, showLog = true) {
                     const isFatal =
                         reason === DisconnectReason.badSession ||
                         reason === DisconnectReason.loggedOut ||
-                        reason === 403 || // banned permanen
-                        reason === 405;   // session expired
+                        reason === 403 ||
+                        reason === 405;
                 
                     if (isFatal && sessionId) {
-                        const nomor = sessionId.split(":")[0]; // ambil nomor WA dari ID
+                        const nomor = sessionId.split(":")[0];
                         const index = activeSockets.findIndex(s => s.id === sessionId);
                         if (index !== -1) {
                             activeSockets.splice(index, 1);
@@ -217,11 +217,6 @@ async function startBot(sessionPath, silent = false, showLog = true) {
                 
                         try {
                             fs.rmSync(sessionPath, { recursive: true, force: true });
-                
-                            // ✅ Log ke audit teknis
-                            logErrorToFile("SessionFatalDisconnect", `Session '${path.basename(sessionPath)}' dihapus karena kode ${reason}`);
-                
-                            // ✅ Tambahkan ke fatal.txt
                             const fatalPath = "fatal.txt";
                             const line = `${new Date().toISOString()} | ${nomor} | reason ${reason}\n`;
                             fs.appendFileSync(fatalPath, line);
@@ -231,7 +226,6 @@ async function startBot(sessionPath, silent = false, showLog = true) {
                                 console.log(`📝 Nomor '${nomor}' dicatat ke fatal.txt`);
                             }
                         } catch (err) {
-                            logErrorToFile("SessionDeleteError", `Gagal hapus session '${path.basename(sessionPath)}': ${err.message}`);
                             if (showLog) {
                                 console.log(`⚠️ Gagal hapus session '${path.basename(sessionPath)}':`, err.message);
                             }
@@ -241,8 +235,7 @@ async function startBot(sessionPath, silent = false, showLog = true) {
                         if (!silent && showLog) showMainMenu();
                         return;
                     }
-                
-                    // Jika bukan fatal, bersihkan socket dan coba login ulang
+
                     if (sessionId) {
                         const index = activeSockets.findIndex(s => s.id === sessionId);
                         if (index !== -1) {
@@ -252,8 +245,7 @@ async function startBot(sessionPath, silent = false, showLog = true) {
                             activeSockets.splice(index, 1);
                         }
                     }
-                
-                    // Coba login ulang
+
                     startBot(sessionPath, silent, showLog);
                 }
             });
@@ -470,7 +462,6 @@ async function kirimSalamKeGrup(sock, groupId, name) {
         metadata.participants?.forEach(p => console.log(`- ${p.id}`));
         console.log(`🔍 ID akun: ${akunId}`);
 
-        // Validasi hanya untuk grup biasa
         if (!isKomunitas) {
             const participants = metadata.participants?.map(p => p.id) || [];
             const isMember = participants.includes(akunId);
@@ -634,7 +625,6 @@ async function safeSend(sock, jid, pesan, akunName, index) {
                 return;
             }
 
-            // 🔍 Validasi dasar koneksi
             const isValidSession =
                 typeof sock?.sendMessage === "function" &&
                 typeof sock?.user?.id === "string" &&
@@ -645,7 +635,6 @@ async function safeSend(sock, jid, pesan, akunName, index) {
                 return;
             }
 
-            // 🔐 Validasi koneksi aktif secara nyata
             try {
                 await sock.assertSessions([jid]);
             } catch (sessionErr) {
@@ -653,12 +642,10 @@ async function safeSend(sock, jid, pesan, akunName, index) {
                 return;
             }
 
-            // 🔧 Bangunkan socket sebelum kirim
             await sock.sendPresenceUpdate("available");
             await sock.presenceSubscribe(jid);
             await new Promise(resolve => setTimeout(resolve, 500));
 
-            // 🚀 Kirim pesan
             await sock.sendMessage(jid, { text: pesan });
             const now = new Date().toLocaleTimeString();
             console.log(`✅ [${akunName} ${index}] ${pesan} — ${now}`);
@@ -670,10 +657,8 @@ async function safeSend(sock, jid, pesan, akunName, index) {
             const isTimeout = err?.output?.statusCode === 408 || err?.message?.includes("Timed Out");
             const isConnClosed = err?.message?.includes("Connection Closed") || err?.message?.includes("close");
             const waitMs = isTimeout || isConnClosed ? 30000 : 10000;
-
             console.log(`⚠️ [${akunName} ${index}] Gagal kirim (percobaan ${attempt}): ${err.message}`);
 
-            // 🔁 Emit reconnect jika koneksi tertutup
             if (sock?.state?.connection !== "open" && typeof sock?.ev?.emit === "function") {
                 try {
                     sock.ev.emit("connection.update", { connection: "connecting" });
@@ -702,7 +687,6 @@ async function menuKirimPesanKeDiriSendiriMultiSession() {
         return showMainMenu();
     }
 
-    // Validasi socket aktif dan siap kirim
     const validSockets = activeSockets.filter(s =>
         s.sock &&
         typeof s.sock.sendMessage === "function" &&
@@ -952,7 +936,6 @@ async function pindahkanSession() {
                 }
             }
 
-            // 🔧 Tambahan: pastikan semua session di folder sessions diload ulang
             if (isBackup) {
                 const semuaFolder = fs.readdirSync(SESSIONS_ROOT).filter(f =>
                     fs.lstatSync(path.join(SESSIONS_ROOT, f)).isDirectory()
