@@ -735,11 +735,11 @@ async function menuKirimPesanKeDiriSendiriMultiSession() {
         }
 
         const totalPesan = lines.length;
-        const shuffledPesan = [...lines].sort(() => Math.random() - 0.5);
-
         const startTime = Date.now();
+        const pesanTeracak = [...lines].sort(() => Math.random() - 0.5);
+        const batchCount = Math.ceil(totalPesan / totalSessionAwal);
 
-        for (let i = 0; i < totalPesan; i++) {
+        for (let i = 0; i < batchCount; i++) {
             const minDelayMinutes = 10;
             const maxDelayMinutes = 17;
             const delayMinutes = Math.floor(Math.random() * (maxDelayMinutes - minDelayMinutes + 1)) + minDelayMinutes;
@@ -748,25 +748,24 @@ async function menuKirimPesanKeDiriSendiriMultiSession() {
 
             console.log(`\nSession Awal ${totalSessionAwal} Delay Pesan [${i + 1}] => ${delayMinutes} menit ${delaySeconds} detik`);
 
-            let nomorUrut = 1;
+            const pesanBatch = pesanTeracak.slice(i * totalSessionAwal, (i + 1) * totalSessionAwal);
 
-            await Promise.all(sessionAwal.map(async (akun) => {
+            await Promise.all(sessionAwal.map(async (akun, idx) => {
                 const jid = akun.sock.user.id;
-                const pesanIndex = (i + nomorUrut - 1) % totalPesan;
-                const pesan = shuffledPesan[pesanIndex];
+                const pesan = pesanBatch[idx];
+
+                if (!pesan) return;
 
                 try {
                     const sukses = await safeSend(akun.sock, jid, pesan, akun.name, i + 1);
                     if (sukses) {
                         const now = new Date();
                         const waktu = `${String(now.getHours()).padStart(2, "0")}.${String(now.getMinutes()).padStart(2, "0")}.${String(now.getSeconds()).padStart(2, "0")}`;
-                        console.log(`✅ [${nomorUrut}]-[${akun.name}] ${pesan} — ${waktu}`);
+                        console.log(`✅ [${idx + 1}]-[${akun.name}] ${pesan} — ${waktu}`);
                     }
                 } catch (err) {
-                    console.log(`❌ [${nomorUrut}]-[${akun.name}] Gagal: ${err.message}`);
+                    console.log(`❌ [${idx + 1}]-[${akun.name}] Gagal: ${err.message}`);
                 }
-
-                nomorUrut++;
             }));
 
             console.log("──────────────────────────────────────────────────────────────────────");
