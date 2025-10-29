@@ -205,33 +205,34 @@ async function startBot(sessionPath, silent = false, showLog = true) {
                     const reason = lastDisconnect?.error?.output?.statusCode;
                     const sessionId = sock?.user?.id;
                 
+                    if (!sessionId) return startBot(sessionPath, silent, showLog);
+                
+                    const sessionName = path.basename(sessionPath);
+                    const nomor = sessionId.split(":")[0];
+                    const index = activeSockets.findIndex(s => s.id === sessionId);
+                    if (index !== -1) activeSockets.splice(index, 1);
+
+                    if (reason === 403) {
+                        const delayFolder = "./delay_403";
+                        const targetPath = path.join(delayFolder, sessionName);
+                        if (!fs.existsSync(delayFolder)) fs.mkdirSync(delayFolder);
+                
+                        try {
+                            fs.renameSync(sessionPath, targetPath);
+                            console.log(`⏳ Session ${sessionName} dipindahkan ke folder delay_403`);
+                        } catch (err) {
+                            console.log(`⚠️ Gagal pindahkan session ${sessionName} ke delay_403: ${err.message}`);
+                        }
+                
+                        return resolve();
+                    }
+
                     const isFatal =
                         reason === DisconnectReason.badSession ||
                         reason === DisconnectReason.loggedOut ||
-                        reason === 403 ||
                         reason === 405;
                 
-                    if (isFatal && sessionId) {
-                        const sessionName = path.basename(sessionPath);
-                        const nomor = sessionId.split(":")[0];
-                        const index = activeSockets.findIndex(s => s.id === sessionId);
-                        if (index !== -1) activeSockets.splice(index, 1);
-
-                        if (reason === 403) {
-                            const delayFolder = "./delay_403";
-                            const targetPath = path.join(delayFolder, sessionName);
-                            if (!fs.existsSync(delayFolder)) fs.mkdirSync(delayFolder);
-                
-                            try {
-                                fs.renameSync(sessionPath, targetPath);
-                                console.log(`⏳ Session '${sessionName}' dipindahkan ke folder 'delay_403' karena reason 403.`);
-                            } catch (err) {
-                                console.log(`⚠️ Gagal pindahkan session '${sessionName}' ke 'delay_403': ${err.message}`);
-                            }
-                
-                            return resolve();
-                        }
-
+                    if (isFatal) {
                         try {
                             fs.rmSync(sessionPath, { recursive: true, force: true });
                             const fatalPath = "fatal.txt";
@@ -253,15 +254,9 @@ async function startBot(sessionPath, silent = false, showLog = true) {
                         return;
                     }
 
-                    if (sessionId) {
-                        const index = activeSockets.findIndex(s => s.id === sessionId);
-                        if (index !== -1) {
-                            try {
-                                activeSockets[index].sock.ev.removeAllListeners();
-                            } catch {}
-                            activeSockets.splice(index, 1);
-                        }
-                    }
+                    try {
+                        sock.ev.removeAllListeners();
+                    } catch {}
                 
                     startBot(sessionPath, silent, showLog);
                 }
