@@ -741,7 +741,7 @@ async function menuKirimPesanKeDiriSendiriMultiSession() {
 
         for (let i = 0; i < batchCount; i++) {
             const minDelayMinutes = 10;
-            const maxDelayMinutes = 17;
+            const maxDelayMinutes = 20;
             const delayMinutes = Math.floor(Math.random() * (maxDelayMinutes - minDelayMinutes + 1)) + minDelayMinutes;
             const delaySeconds = Math.floor(Math.random() * 60);
             const delayMs = (delayMinutes * 60000) + (delaySeconds * 1000);
@@ -749,6 +749,8 @@ async function menuKirimPesanKeDiriSendiriMultiSession() {
             console.log(`\nSession Awal ${totalSessionAwal} Delay Pesan [${i + 1}] => ${delayMinutes} menit ${delaySeconds} detik`);
 
             const pesanBatch = pesanTeracak.slice(i * totalSessionAwal, (i + 1) * totalSessionAwal);
+
+            const hasilBatch = [];
 
             await Promise.all(sessionAwal.map(async (akun, idx) => {
                 const jid = akun.sock.user.id;
@@ -761,12 +763,22 @@ async function menuKirimPesanKeDiriSendiriMultiSession() {
                     if (sukses) {
                         const now = new Date();
                         const waktu = `${String(now.getHours()).padStart(2, "0")}.${String(now.getMinutes()).padStart(2, "0")}.${String(now.getSeconds()).padStart(2, "0")}`;
-                        console.log(`✅ [${idx + 1}]-[${akun.name}] ${pesan} — ${waktu}`);
+                        hasilBatch.push({ urut: idx + 1, name: akun.name, pesan, waktu });
                     }
                 } catch (err) {
-                    console.log(`❌ [${idx + 1}]-[${akun.name}] Gagal: ${err.message}`);
+                    hasilBatch.push({ urut: idx + 1, name: akun.name, pesan: `Gagal: ${err.message}`, waktu: null });
                 }
             }));
+
+            hasilBatch
+                .sort((a, b) => a.urut - b.urut)
+                .forEach(h => {
+                    if (h.waktu) {
+                        console.log(`✅ [${h.urut}]-[${h.name}] ${h.pesan} — ${h.waktu}`);
+                    } else {
+                        console.log(`❌ [${h.urut}]-[${h.name}] ${h.pesan}`);
+                    }
+                });
 
             console.log("──────────────────────────────────────────────────────────────────────");
             await new Promise(resolve => setTimeout(resolve, delayMs));
