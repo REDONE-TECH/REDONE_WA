@@ -734,29 +734,23 @@ async function menuKirimPesanKeDiriSendiriMultiSession() {
             return showMainMenu();
         }
 
-        const totalPesan = lines.length;
-        const startTime = Date.now();
         const pesanTeracak = [...lines].sort(() => Math.random() - 0.5);
-        const batchCount = Math.ceil(totalPesan / totalSessionAwal);
+        const startTime = Date.now();
 
-        for (let i = 0; i < batchCount; i++) {
-            const minDelayMinutes = 10;
-            const maxDelayMinutes = 20;
+        for (let i = 0; i < pesanTeracak.length; i++) {
+            const minDelayMinutes = 7;
+            const maxDelayMinutes = 15;
             const delayMinutes = Math.floor(Math.random() * (maxDelayMinutes - minDelayMinutes + 1)) + minDelayMinutes;
             const delaySeconds = Math.floor(Math.random() * 60);
             const delayMs = (delayMinutes * 60000) + (delaySeconds * 1000);
 
             console.log(`\nSession Awal ${totalSessionAwal} Delay Pesan [${i + 1}] => ${delayMinutes} menit ${delaySeconds} detik`);
 
-            const pesanBatch = pesanTeracak.slice(i * totalSessionAwal, (i + 1) * totalSessionAwal);
-
+            const pesan = pesanTeracak[i];
             const hasilBatch = [];
 
             await Promise.all(sessionAwal.map(async (akun, idx) => {
                 const jid = akun.sock.user.id;
-                const pesan = pesanBatch[idx];
-
-                if (!pesan) return;
 
                 try {
                     const sukses = await safeSend(akun.sock, jid, pesan, akun.name, i + 1);
@@ -790,7 +784,7 @@ async function menuKirimPesanKeDiriSendiriMultiSession() {
         const detik = Math.floor((durasiMs % 60000) / 1000);
 
         console.log(`⏱️ Durasi siklus: ${menit} menit ${detik} detik`);
-        console.log("🔁 Semua pesan sudah dikirim. Mengulang siklus baru...\n");
+        console.log("🔁 Semua pesan sudah dikirim ke semua session. Mengulang siklus baru...\n");
     }
 }
 
