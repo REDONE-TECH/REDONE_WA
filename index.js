@@ -729,19 +729,18 @@ async function menuKirimPesanKeDiriSendiriMultiSession() {
             return showMainMenu();
         }
 
-        const pesanTeracak = [...lines].sort(() => Math.random() - 0.5);
         const startTime = Date.now();
 
-        for (let i = 0; i < pesanTeracak.length; i++) {
-            const minDelayMinutes = 7;
-            const maxDelayMinutes = 15;
+        for (let i = 0; i < lines.length; i++) {
+            const minDelayMinutes = 5;
+            const maxDelayMinutes = 10;
             const delayMinutes = Math.floor(Math.random() * (maxDelayMinutes - minDelayMinutes + 1)) + minDelayMinutes;
             const delaySeconds = Math.floor(Math.random() * 60);
             const delayMs = (delayMinutes * 60000) + (delaySeconds * 1000);
 
             console.log(`\nSession Awal ${totalSessionAwal} Delay Pesan [${i + 1}] => ${delayMinutes} menit ${delaySeconds} detik`);
 
-            const pesan = pesanTeracak[i];
+            const pesan = lines[i];
             const hasilBatch = [];
 
             await Promise.all(sessionAwal.map(async (akun, idx) => {
