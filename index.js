@@ -732,8 +732,8 @@ async function menuKirimPesanKeDiriSendiriMultiSession() {
         const startTime = Date.now();
 
         for (let i = 0; i < lines.length; i++) {
-            const minDelayMinutes = 5;
-            const maxDelayMinutes = 10;
+            const minDelayMinutes = 10;
+            const maxDelayMinutes = 20;
             const delayMinutes = Math.floor(Math.random() * (maxDelayMinutes - minDelayMinutes + 1)) + minDelayMinutes;
             const delaySeconds = Math.floor(Math.random() * 60);
             const delayMs = (delayMinutes * 60000) + (delaySeconds * 1000);
