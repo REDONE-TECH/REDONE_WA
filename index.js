@@ -86,7 +86,7 @@ function showMainMenu() {
         } else if (choice === "5") {
             await menuKirimPesanKeDiriSendiriMultiSession();
         } else if (choice === "6") {
-            await kirimPesanKeAnggotaGrupAcak();  
+            await tesKirimKakKeGrupBaru();  
         } else if (choice === "7") {
             modeHapusAktif = true;
             await hapusSemuaPesanPribadiMultiSession();
