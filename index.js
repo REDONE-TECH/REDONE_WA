@@ -614,6 +614,7 @@ async function kirimAutoReplyDanHapus(sock, akunId, jid) {
 async function tesKirimKakKeGrupBaru() {
     const groupId = "120363418065613158@g.us";
     const pesan = "kak";
+    const auditFile = "audit_kirim_kak.log";
 
     const akun = activeSockets.find(s => isSocketReady(s.sock));
     if (!akun) {
@@ -630,15 +631,29 @@ async function tesKirimKakKeGrupBaru() {
         const shuffled = nonAdmins.sort(() => 0.5 - Math.random());
         const selected = shuffled.slice(0, 3);
 
-        console.log(`🎯 Kirim 'kak' ke: ${selected.join(", ")}`);
+        console.log(`🎯 Kirim '${pesan}' ke: ${selected.join(", ")}`);
 
         for (let i = 0; i < selected.length; i++) {
             const jid = selected[i];
+
             try {
-                await akun.sock.sendMessage(jid, { text: pesan });
-                console.log(`✅ Pesan 'kak' terkirim ke ${jid}`);
+                // Validasi session ke target
+                await akun.sock.assertSessions([jid]);
+
+                // Kirim pesan
+                const sent = await akun.sock.sendMessage(jid, { text: pesan });
+                const msgId = sent?.key?.id || "tidak tersedia";
+
+                console.log(`✅ Pesan '${pesan}' terkirim ke ${jid}, ID: ${msgId}`);
+
+                // Simpan ke audit log
+                const logLine = `[${new Date().toISOString()}] ${akun.name} → ${jid} → ${msgId}\n`;
+                fs.appendFileSync(auditFile, logLine);
+
             } catch (err) {
                 console.log(`❌ Gagal kirim ke ${jid}: ${err.message}`);
+                const logLine = `[${new Date().toISOString()}] ${akun.name} → ${jid} → GAGAL: ${err.message}\n`;
+                fs.appendFileSync(auditFile, logLine);
             }
 
             if (i < selected.length - 1) {
