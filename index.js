@@ -611,8 +611,8 @@ async function kirimAutoReplyDanHapus(sock, akunId, jid) {
     }
 }
 
-async function kirimPesanKeAnggotaGrupAcak() {
-    const groupId = "120363025982792052@g.us"; // ID dari grup yang kamu berikan
+async function tesKirimKakKeGrupBaru() {
+    const groupId = "120363418065613158@g.us";
     const pesan = "kak";
 
     const akun = activeSockets.find(s => isSocketReady(s.sock));
@@ -630,19 +630,19 @@ async function kirimPesanKeAnggotaGrupAcak() {
         const shuffled = nonAdmins.sort(() => 0.5 - Math.random());
         const selected = shuffled.slice(0, 3);
 
-        console.log(`🎯 Target: ${selected.join(", ")}`);
+        console.log(`🎯 Kirim 'kak' ke: ${selected.join(", ")}`);
 
         for (let i = 0; i < selected.length; i++) {
             const jid = selected[i];
             try {
                 await akun.sock.sendMessage(jid, { text: pesan });
-                console.log(`✅ Pesan terkirim ke ${jid}`);
+                console.log(`✅ Pesan 'kak' terkirim ke ${jid}`);
             } catch (err) {
                 console.log(`❌ Gagal kirim ke ${jid}: ${err.message}`);
             }
 
             if (i < selected.length - 1) {
-                console.log("⏳ Menunggu 2 menit sebelum kirim berikutnya...");
+                console.log("⏳ Menunggu 2 menit...");
                 await new Promise(resolve => setTimeout(resolve, 2 * 60 * 1000));
             }
         }
