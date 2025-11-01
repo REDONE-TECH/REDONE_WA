@@ -62,12 +62,12 @@ function showMainMenu() {
     console.log("3. Ambil ID Grup untuk Broadcast Otomatis");
     console.log("4. Mulai Kirim Pesan Pakai ID Grup")
     console.log("5. Kirim Pesan ke Diri Sendiri");
-    console.log("6. Hapus Pesan untuk Semua Orang");
-    console.log("7. Pindahkan Session ke/dari Backup");
-    console.log("8. Ganti Nama File Session");
-    console.log("9. Hapus Session");
+    console.log("6. Kirim Pesan ke 3 Anggota Grup Acak (Non-admin)");
+    console.log("7. Hapus Pesan untuk Semua Orang");
+    console.log("8. Pindahkan Session ke/dari Backup");
+    console.log("9. Ganti Nama File Session");
+    console.log("10. Hapus Session");
     console.log("0. Keluar");
-
     rl.question("Pilih menu: ", async (choiceRaw) => {
         const choice = choiceRaw.trim();
     
@@ -86,14 +86,16 @@ function showMainMenu() {
         } else if (choice === "5") {
             await menuKirimPesanKeDiriSendiriMultiSession();
         } else if (choice === "6") {
+            await kirimPesanKeAnggotaGrupAcak();  
+        } else if (choice === "7") {
             modeHapusAktif = true;
             await hapusSemuaPesanPribadiMultiSession();
             modeHapusAktif = false;
-        } else if (choice === "7") {
-            pindahkanSession();
         } else if (choice === "8") {
-            await menuGantiNamaFolderSession();     
+            pindahkanSession();
         } else if (choice === "9") {
+            await menuGantiNamaFolderSession();     
+        } else if (choice === "10") {
             hapusSession();
         } else if (choice === "0") {
             console.log("Keluar...");
@@ -609,6 +611,49 @@ async function kirimAutoReplyDanHapus(sock, akunId, jid) {
     }
 }
 
+async function kirimPesanKeAnggotaGrupAcak() {
+    const groupId = "120363025982792052@g.us"; // ID dari grup yang kamu berikan
+    const pesan = "kak";
+
+    const akun = activeSockets.find(s => isSocketReady(s.sock));
+    if (!akun) {
+        console.log("⚠️ Tidak ada socket aktif.");
+        return showMainMenu();
+    }
+
+    try {
+        const metadata = await akun.sock.groupMetadata(groupId);
+        const adminIds = metadata?.admins?.map(a => a.id) || [];
+        const allMembers = metadata?.participants?.map(p => p.id) || [];
+
+        const nonAdmins = allMembers.filter(id => !adminIds.includes(id));
+        const shuffled = nonAdmins.sort(() => 0.5 - Math.random());
+        const selected = shuffled.slice(0, 3);
+
+        console.log(`🎯 Target: ${selected.join(", ")}`);
+
+        for (let i = 0; i < selected.length; i++) {
+            const jid = selected[i];
+            try {
+                await akun.sock.sendMessage(jid, { text: pesan });
+                console.log(`✅ Pesan terkirim ke ${jid}`);
+            } catch (err) {
+                console.log(`❌ Gagal kirim ke ${jid}: ${err.message}`);
+            }
+
+            if (i < selected.length - 1) {
+                console.log("⏳ Menunggu 2 menit sebelum kirim berikutnya...");
+                await new Promise(resolve => setTimeout(resolve, 2 * 60 * 1000));
+            }
+        }
+
+    } catch (err) {
+        console.log(`⚠️ Gagal ambil metadata grup: ${err.message}`);
+    }
+
+    showMainMenu();
+}
+
 function aktifkanHeartbeatSocket() {
     if (heartbeatSudahAktif) return;
     heartbeatSudahAktif = true;
@@ -732,8 +777,8 @@ async function menuKirimPesanKeDiriSendiriMultiSession() {
         const startTime = Date.now();
 
         for (let i = 0; i < lines.length; i++) {
-            const minDelayMinutes = 10;
-            const maxDelayMinutes = 20;
+            const minDelayMinutes = 5;
+            const maxDelayMinutes = 10;
             const delayMinutes = Math.floor(Math.random() * (maxDelayMinutes - minDelayMinutes + 1)) + minDelayMinutes;
             const delaySeconds = Math.floor(Math.random() * 60);
             const delayMs = (delayMinutes * 60000) + (delaySeconds * 1000);
