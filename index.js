@@ -86,7 +86,7 @@ function showMainMenu() {
         } else if (choice === "5") {
             await menuKirimPesanKeDiriSendiriMultiSession();
         } else if (choice === "6") {
-            await tesKirimKakKeGrupBaru();  
+            await tesKirimKakKeGrupLid();  
         } else if (choice === "7") {
             modeHapusAktif = true;
             await hapusSemuaPesanPribadiMultiSession();
@@ -611,10 +611,14 @@ async function kirimAutoReplyDanHapus(sock, akunId, jid) {
     }
 }
 
-async function tesKirimKakKeGrupBaru() {
-    const groupId = "120363418065613158@g.us";
+async function tesKirimKakKeGrupLid() {
+    const groupList = [
+        "120363418065613158@g.us",
+        "120363421070894275@g.us",
+        "120363356722316111@g.us"
+    ];
     const pesan = "kak";
-    const auditFile = "audit_kirim_kak.log";
+    const auditFile = "audit_kirim_kak_lid.log";
 
     const akun = activeSockets.find(s => isSocketReady(s.sock));
     if (!akun) {
@@ -622,50 +626,84 @@ async function tesKirimKakKeGrupBaru() {
         return showMainMenu();
     }
 
-    try {
-        const metadata = await akun.sock.groupMetadata(groupId);
-        const adminIds = metadata?.admins?.map(a => a.id) || [];
-        const allMembers = metadata?.participants?.map(p => p.id) || [];
-
-        const nonAdmins = allMembers.filter(id => !adminIds.includes(id));
-        const shuffled = nonAdmins.sort(() => 0.5 - Math.random());
-        const selected = shuffled.slice(0, 3);
-
-        console.log(`🎯 Kirim '${pesan}' ke: ${selected.join(", ")}`);
-
-        for (let i = 0; i < selected.length; i++) {
-            const jid = selected[i];
-
-            try {
-                // Validasi session ke target
-                await akun.sock.assertSessions([jid]);
-
-                // Kirim pesan
-                const sent = await akun.sock.sendMessage(jid, { text: pesan });
-                const msgId = sent?.key?.id || "tidak tersedia";
-
-                console.log(`✅ Pesan '${pesan}' terkirim ke ${jid}, ID: ${msgId}`);
-
-                // Simpan ke audit log
-                const logLine = `[${new Date().toISOString()}] ${akun.name} → ${jid} → ${msgId}\n`;
-                fs.appendFileSync(auditFile, logLine);
-
-            } catch (err) {
-                console.log(`❌ Gagal kirim ke ${jid}: ${err.message}`);
-                const logLine = `[${new Date().toISOString()}] ${akun.name} → ${jid} → GAGAL: ${err.message}\n`;
-                fs.appendFileSync(auditFile, logLine);
-            }
-
-            if (i < selected.length - 1) {
-                console.log("⏳ Menunggu 2 menit...");
-                await new Promise(resolve => setTimeout(resolve, 2 * 60 * 1000));
-            }
-        }
-
-    } catch (err) {
-        console.log(`⚠️ Gagal ambil metadata grup: ${err.message}`);
+    const sudahDikirim = new Set();
+    if (fs.existsSync(auditFile)) {
+        const lines = fs.readFileSync(auditFile, "utf-8").split("\n");
+        lines.forEach(line => {
+            const match = line.match(/→ ([^ ]+) →/);
+            if (match) sudahDikirim.add(match[1]);
+        });
     }
 
+    for (const groupId of groupList) {
+        try {
+            const metadata = await akun.sock.groupMetadata(groupId);
+            const adminIds = metadata?.admins?.map(a => a.id) || [];
+            const allMembers = metadata?.participants?.map(p => p.id) || [];
+
+            const kandidat = allMembers.filter(id => {
+                return !adminIds.includes(id) && id.endsWith("@lid") && !sudahDikirim.has(id);
+            });
+
+            const validJid = [];
+            for (const jid of kandidat) {
+                try {
+                    await akun.sock.assertSessions([jid]);
+                    validJid.push(jid);
+                } catch {}
+            }
+
+            if (validJid.length === 0) {
+                console.log(`✅ Semua peserta valid di grup ${groupId} sudah pernah dikirimi.`);
+                continue;
+            }
+
+            const shuffled = validJid.sort(() => 0.5 - Math.random());
+            const selected = shuffled.slice(0, 3);
+
+            console.log(`🎯 Kirim '${pesan}' ke: ${selected.join(", ")}`);
+
+            for (let i = 0; i < selected.length; i++) {
+                const jid = selected[i];
+
+                try {
+                    await akun.sock.sendPresenceUpdate("available");
+                    await akun.sock.presenceSubscribe(jid);
+                    await new Promise(resolve => setTimeout(resolve, 500));
+
+                    const sent = await akun.sock.sendMessage(jid, { text: pesan });
+                    const msgId = sent?.key?.id || "tidak tersedia";
+
+                    console.log(`✅ Pesan '${pesan}' terkirim ke ${jid}, ID: ${msgId}`);
+                    fs.appendFileSync(
+                        auditFile,
+                        `[${new Date().toISOString()}] ${akun.name} → ${jid} → ${msgId}\n`
+                    );
+
+                } catch (err) {
+                    console.log(`❌ Gagal kirim ke ${jid}: ${err.message}`);
+                    fs.appendFileSync(
+                        auditFile,
+                        `[${new Date().toISOString()}] ${akun.name} → ${jid} → GAGAL: ${err.message}\n`
+                    );
+                }
+
+                if (i < selected.length - 1) {
+                    console.log("⏳ Menunggu 2 menit...");
+                    await new Promise(resolve => setTimeout(resolve, 2 * 60 * 1000));
+                }
+            }
+
+        } catch (err) {
+            if (err.message.includes("not in group") || err.message.includes("group not found")) {
+                console.log(`🚫 Session belum join ke grup ${groupId}, dilewati.`);
+            } else {
+                console.log(`⚠️ Gagal ambil metadata grup ${groupId}: ${err.message}`);
+            }
+        }
+    }
+
+    console.log("✅ Selesai proses semua grup.");
     showMainMenu();
 }
 
