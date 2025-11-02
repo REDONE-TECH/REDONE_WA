@@ -41,8 +41,21 @@ process.on("unhandledRejection", (reason, promise) => {
 });
 
 function showMainMenu() {
-    console.log("\n==== STATUS SESSION ====");
+    const hitungIsiFolder = (folderPath) => {
+        if (!fs.existsSync(folderPath)) return 0;
+        return fs.readdirSync(folderPath).filter(f => fs.statSync(path.join(folderPath, f)).isDirectory()).length;
+    };
 
+    const jumlahSession = hitungIsiFolder("./session");
+    const jumlahBackup = hitungIsiFolder("./backup");
+    const jumlahDelay = hitungIsiFolder("./delay_403");
+
+    console.log("\n==== STATUS FOLDER ====");
+    console.log(`📁 ./session     : ${jumlahSession} folder`);
+    console.log(`📁 ./backup      : ${jumlahBackup} folder`);
+    console.log(`📁 ./delay_403   : ${jumlahDelay} folder`);
+
+    console.log("\n==== STATUS SESSION ====");
     const sessionAktif = activeSockets.filter(s =>
         s.sock?.user &&
         typeof s.sock?.sendMessage === "function"
@@ -60,7 +73,7 @@ function showMainMenu() {
     console.log("1. Login / Tambah Session");
     console.log("2. Cek Status Batch Session");
     console.log("3. Ambil ID Grup untuk Broadcast Otomatis");
-    console.log("4. Mulai Kirim Pesan Pakai ID Grup")
+    console.log("4. Mulai Kirim Pesan Pakai ID Grup");
     console.log("5. Kirim Pesan ke Diri Sendiri");
     console.log("6. Kirim Pesan ke 3 Anggota Grup Acak (Non-admin)");
     console.log("7. Hapus Pesan untuk Semua Orang");
@@ -70,23 +83,22 @@ function showMainMenu() {
     console.log("0. Keluar");
     rl.question("Pilih menu: ", async (choiceRaw) => {
         const choice = choiceRaw.trim();
-    
         if (choice === "1") {
             loginSessionBaru();
         } else if (choice === "2") {
             await autoLoginSemuaSession(10);
             aktifkanHeartbeatSocket();
             jadwalkanRefreshOtomatis();
-            showMainMenu();   
+            showMainMenu();
         } else if (choice === "3") {
             await jalankanPemilihanGrupBroadcast();
-            showMainMenu();         
+            showMainMenu();
         } else if (choice === "4") {
             startAutoBroadcastFromFile();
         } else if (choice === "5") {
             await menuKirimPesanKeDiriSendiriMultiSession();
         } else if (choice === "6") {
-            await tesKirimKakKeGrupLid();  
+            await tesKirimKakKeGrupLid();
         } else if (choice === "7") {
             modeHapusAktif = true;
             await hapusSemuaPesanPribadiMultiSession();
@@ -94,7 +106,7 @@ function showMainMenu() {
         } else if (choice === "8") {
             pindahkanSession();
         } else if (choice === "9") {
-            await menuGantiNamaFolderSession();     
+            await menuGantiNamaFolderSession();
         } else if (choice === "10") {
             hapusSession();
         } else if (choice === "0") {
@@ -165,9 +177,10 @@ async function startBot(sessionPath, silent = false, showLog = true) {
     return new Promise(async (resolve) => {
         try {
             const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
+            const logger = pino({ level: "silent" });
             const sock = makeWASocket({
                 auth: state,
-                logger: pino({ level: "silent" }),
+                logger,
             });
 
             sock.ev.on("creds.update", saveCreds);
@@ -617,7 +630,6 @@ async function tesKirimKakKeGrupLid() {
         "120363421070894275@g.us",
         "120363356722316111@g.us"
     ];
-    const pesan = "kak";
     const auditFile = "audit_kirim_kak_lid.log";
 
     const akun = activeSockets.find(s => isSocketReady(s.sock));
@@ -661,15 +673,35 @@ async function tesKirimKakKeGrupLid() {
             const shuffled = validJid.sort(() => 0.5 - Math.random());
             const selected = shuffled.slice(0, 3);
 
-            console.log(`🎯 Kirim '${pesan}' ke: ${selected.join(", ")}`);
+            console.log(`🎯 Session ${akun.name} kirim pesan ➤ ${selected.join(", ")} `);
 
             for (let i = 0; i < selected.length; i++) {
                 const jid = selected[i];
+                if (!activeSockets.includes(akun)) {
+                    console.log(`🚫 Session ${akun.name} sudah tidak aktif, dilewati.`);
+                    break;
+                }
 
                 try {
                     await akun.sock.sendPresenceUpdate("available");
                     await akun.sock.presenceSubscribe(jid);
                     await new Promise(resolve => setTimeout(resolve, 500));
+
+                    const vcard = await akun.sock.onWhatsApp(jid);
+                    const phone = vcard?.[0]?.jid?.split("@")[0] || "";
+                    let pesan = "hello";
+
+                    if (phone.startsWith("62")) {
+                        pesan = "kak";
+                    } else if (phone.startsWith("7")) {
+                        pesan = "Привет";
+                    } else if (phone.startsWith("972")) {
+                        pesan = "שלום";
+                    } else if (phone.startsWith("60")) {
+                        pesan = "Assalamualaikum";
+                    } else if (phone.startsWith("221")) {
+                        pesan = "Bonjour";
+                    }
 
                     const sent = await akun.sock.sendMessage(jid, { text: pesan });
                     const msgId = sent?.key?.id || "tidak tersedia";
@@ -681,6 +713,11 @@ async function tesKirimKakKeGrupLid() {
                     );
 
                 } catch (err) {
+                    if (err.message.includes("Connection Closed")) {
+                        console.log(`⏳ Session ${akun.name} dipindahkan ke folder delay_403`);
+                        break;
+                    }
+
                     console.log(`❌ Gagal kirim ke ${jid}: ${err.message}`);
                     fs.appendFileSync(
                         auditFile,
@@ -931,7 +968,6 @@ async function hapusSemuaPesanPribadiMultiSession() {
 
     console.log("⏳ Menunggu pesan masuk selama 3 detik...");
     await new Promise(resolve => setTimeout(resolve, 3000));
-
     console.log("🧪 Debug: Isi cache sebelum hapus:");
     for (const akun of activeSockets) {
         const akunId = akun.id;
@@ -947,10 +983,6 @@ async function hapusSemuaPesanPribadiMultiSession() {
         if (input.trim().toLowerCase() === "y") {
             console.log("🔐 Konfirmasi diterima. Mulai hapus pesan dan auto-reply...");
             sedangMenungguKonfirmasi = false;
-
-            let totalBerhasil = 0;
-            let totalGagal = 0;
-
             for (const akun of activeSockets) {
                 const akunId = akun.id;
                 const sock = akun.sock;
