@@ -41,9 +41,18 @@ process.on("unhandledRejection", (reason, promise) => {
 });
 
 function showMainMenu() {
+    const fs = require("fs");
+    const path = require("path");
+
     const hitungIsiFolder = (folderPath) => {
         if (!fs.existsSync(folderPath)) return 0;
-        return fs.readdirSync(folderPath).filter(f => fs.statSync(path.join(folderPath, f)).isDirectory()).length;
+
+        const items = fs.readdirSync(folderPath);
+        return items.filter(item => {
+            const fullPath = path.join(folderPath, item);
+            const stat = fs.statSync(fullPath);
+            return stat.isDirectory() || (stat.isFile() && item.endsWith(".json"));
+        }).length;
     };
 
     const jumlahSession = hitungIsiFolder("./session");
@@ -51,9 +60,9 @@ function showMainMenu() {
     const jumlahDelay = hitungIsiFolder("./delay_403");
 
     console.log("\n==== STATUS FOLDER ====");
-    console.log(`📁 ./session     : ${jumlahSession} folder`);
-    console.log(`📁 ./backup      : ${jumlahBackup} folder`);
-    console.log(`📁 ./delay_403   : ${jumlahDelay} folder`);
+    console.log(`📁 ./session     : ${jumlahSession} session`);
+    console.log(`📁 ./backup      : ${jumlahBackup} session`);
+    console.log(`📁 ./delay_403   : ${jumlahDelay} session`);
 
     console.log("\n==== STATUS SESSION ====");
     const sessionAktif = activeSockets.filter(s =>
@@ -81,8 +90,10 @@ function showMainMenu() {
     console.log("9. Ganti Nama File Session");
     console.log("10. Hapus Session");
     console.log("0. Keluar");
+
     rl.question("Pilih menu: ", async (choiceRaw) => {
         const choice = choiceRaw.trim();
+
         if (choice === "1") {
             loginSessionBaru();
         } else if (choice === "2") {
@@ -586,7 +597,7 @@ function pilihGrupDariSemuaSession(semuaGrup) {
     });
 }
 
-async function kirimAutoReplyDanHapus(sock, akunId, jid) {
+async function kirimAutoReplyDanHapus(sock, akunId, jid, paksaLangsung = false) {
     try {
         const outboundMessages = store.chats[akunId][jid].messages.filter(m =>
             m.key.fromMe && m.message?.conversation !== "maaf salah nomor"
@@ -609,6 +620,11 @@ async function kirimAutoReplyDanHapus(sock, akunId, jid) {
         if (sent?.key) {
             store.chats[akunId][jid].messages.push(sent);
         }
+
+        if (paksaLangsung) {
+            console.log(`🚀 Mode langsung: hapus dan reply ke ${jid} selesai`);
+        }
+
     } catch (err) {
         console.log(`⚠️ Gagal auto-reply ke ${jid}:`, err.message || err);
     } finally {
@@ -632,10 +648,7 @@ async function tesKirimKakKeGrupLid() {
         return showMainMenu();
     }
 
-    // Ambil semua grup yang sudah join
     const groupList = Object.keys(akun.sock?.chats || {}).filter(id => id.endsWith("@g.us"));
-
-    // Baca audit log
     const sudahDikirim = new Set();
     if (fs.existsSync(auditFile)) {
         const lines = fs.readFileSync(auditFile, "utf-8").split("\n");
@@ -675,8 +688,6 @@ async function tesKirimKakKeGrupLid() {
 
             for (let i = 0; i < selected.length; i++) {
                 const jid = selected[i];
-
-                // Cek apakah session masih aktif
                 if (!activeSockets.includes(akun)) {
                     console.log(`🚫 Session ${akun.name} sudah tidak aktif, dilewati.`);
                     break;
@@ -989,6 +1000,7 @@ async function hapusSemuaPesanPribadiMultiSession() {
         if (input.trim().toLowerCase() === "y") {
             console.log("🔐 Konfirmasi diterima. Mulai hapus pesan dan auto-reply...");
             sedangMenungguKonfirmasi = false;
+
             for (const akun of activeSockets) {
                 const akunId = akun.id;
                 const sock = akun.sock;
@@ -1001,28 +1013,21 @@ async function hapusSemuaPesanPribadiMultiSession() {
                         m.key.fromMe && m.message?.conversation !== "maaf salah nomor"
                     );
                     if (outboundMessages.length === 0 || repliedUsers.has(jid)) continue;
-                
+
                     pendingAutoReply.add(jid);
-                
+
                     if (autoRepliedBeforeConfirm.has(jid)) {
                         console.log(`⏭️ Lewatkan auto-reply ke ${jid} (sudah dibalas sebelum konfirmasi)`);
                         pendingAutoReply.delete(jid);
                         continue;
                     }
-                
-                    const delayMs = (Math.floor(Math.random() * (2 - 1 + 1)) + 1) * 60 * 1000;
-                    console.log(`⏳ Akan auto-reply ke ${jid} dalam ${(delayMs / 60000).toFixed(1)} menit`);
-                
-                    setTimeout(async () => {
-                        await kirimAutoReplyDanHapus(sock, akunId, jid, true);
-                    }, delayMs);
+                    console.log(`🚀 Kirim auto-reply dan hapus ke ${jid}...`);
+                    await kirimAutoReplyDanHapus(sock, akunId, jid, true);
                 }
             }
 
-            if (pendingAutoReply.size === 0) {
-                console.log("✅ Tidak ada auto-reply tertunda. Kembali ke menu utama...");
-                showMainMenu();
-            }
+            console.log("✅ Semua auto-reply dan penghapusan selesai.");
+            showMainMenu();
         } else {
             sedangMenungguKonfirmasi = false;
             console.log("❌ Konfirmasi tidak diberikan. Kembali ke menu utama...");
