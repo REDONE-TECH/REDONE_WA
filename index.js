@@ -625,19 +625,17 @@ async function kirimAutoReplyDanHapus(sock, akunId, jid) {
 }
 
 async function tesKirimKakKeGrupLid() {
-    const groupList = [
-        "120363418065613158@g.us",
-        "120363421070894275@g.us",
-        "120363356722316111@g.us"
-    ];
     const auditFile = "audit_kirim_kak_lid.log";
-
     const akun = activeSockets.find(s => isSocketReady(s.sock));
     if (!akun) {
         console.log("⚠️ Tidak ada socket aktif.");
         return showMainMenu();
     }
 
+    // Ambil semua grup yang sudah join
+    const groupList = Object.keys(akun.sock?.chats || {}).filter(id => id.endsWith("@g.us"));
+
+    // Baca audit log
     const sudahDikirim = new Set();
     if (fs.existsSync(auditFile)) {
         const lines = fs.readFileSync(auditFile, "utf-8").split("\n");
@@ -673,10 +671,12 @@ async function tesKirimKakKeGrupLid() {
             const shuffled = validJid.sort(() => 0.5 - Math.random());
             const selected = shuffled.slice(0, 3);
 
-            console.log(`🎯 Session ${akun.name} kirim pesan ➤ ${selected.join(", ")} `);
+            console.log(`🎯 Session ${akun.name} kirim pesan ➤ ${selected.join(", ")}`);
 
             for (let i = 0; i < selected.length; i++) {
                 const jid = selected[i];
+
+                // Cek apakah session masih aktif
                 if (!activeSockets.includes(akun)) {
                     console.log(`🚫 Session ${akun.name} sudah tidak aktif, dilewati.`);
                     break;
@@ -701,6 +701,12 @@ async function tesKirimKakKeGrupLid() {
                         pesan = "Assalamualaikum";
                     } else if (phone.startsWith("221")) {
                         pesan = "Bonjour";
+                    } else if (phone.startsWith("20")) {
+                        pesan = "مرحبًا";
+                    } else if (phone.startsWith("963")) {
+                        pesan = "مرحبًا";
+                    } else if (phone.startsWith("30")) {
+                        pesan = "Γειά σου";    
                     }
 
                     const sent = await akun.sock.sendMessage(jid, { text: pesan });
